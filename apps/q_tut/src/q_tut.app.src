@@ -1,0 +1,16 @@
+{application, q_tut,
+ [{description, "An OTP application"},
+  {vsn, "0.2.0"},
+  {registered, []},
+  {mod, {q_tut_app, []}},
+  {applications,
+   [kernel,
+    klsn,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.

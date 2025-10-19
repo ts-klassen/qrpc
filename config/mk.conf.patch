@@ -1,0 +1,27 @@
+@@ -377,7 +377,7 @@
+ #
+ # Keywords: work tmp
+ 
+-LOCALBASE?=	/usr/pkg
++LOCALBASE?=	/opt/qrpc/pkg
+ #	This is the base directory where all packages will be installed.
+ #
+ #	Possible values: Any absolute path that does not contain special
+@@ -391,7 +391,7 @@
+ # Possible: any path
+ # Default: ${LOCALBASE}/cross
+ 
+-VARBASE?=	/var
++VARBASE?=	/opt/qrpc/var
+ # Where files containing local state information are installed
+ # Possible: any path
+ # Default: /var
+@@ -515,7 +515,7 @@
+ # Possible: yes or no.
+ # Default: no.
+ 
+-SYSCONFBASE?= /etc
++SYSCONFBASE?= /opt/qrpc/etc
+ # This is the config directory under which system configuration files are
+ # expected.
+ # Possible: any path you like

@@ -1,0 +1,76 @@
+#!/usr/bin/bash
+
+cd `dirname $0`
+
+case "$1" in
+  bootstrap)
+    if sudo mountpoint -q _root/opt/qrpc; then
+      sudo umount _root/opt/qrpc || sudo umount -l _root/opt/qrpc || true
+    fi
+    sudo rm -rf _root
+    sudo rm -rf /opt/qrpc/pkg
+    sudo apt-get update --allow-releaseinfo-change
+    sudo apt-get install -y debootstrap patch
+    sudo debootstrap --variant=minbase jammy _root http://archive.ubuntu.com/ubuntu/
+    sudo mkdir -p /opt/qrpc
+    sudo mkdir -p _root/opt/qrpc
+    sudo mount --bind /opt/qrpc _root/opt/qrpc
+    sudo bash -c 'echo nameserver 8.8.8.8 >> _root/etc/resolv.conf'
+    sudo git clone https://github.com/NetBSD/pkgsrc.git _root/root/pkgsrc
+    sudo patch _root/root/pkgsrc/mk/defaults/mk.conf < config/mk.conf.patch
+    sudo cp -r meta-pkgs/* _root/root/pkgsrc/meta-pkgs/.
+    sudo bash -c 'echo >> _root/etc/bash.bashrc'
+    sudo bash -c 'echo '"'"'export PATH=/opt/qrpc/pkg/bin:$PATH'"'"' >> _root/etc/bash.bashrc'
+    sudo bash -c 'echo '"'"'export MANPATH=/opt/qrpc/pkg/man:$MANPATH'"'"' >> _root/etc/bash.bashrc'
+    sudo chroot _root /usr/bin/apt-get update
+    sudo chroot _root /usr/bin/apt-get install -y gcc g++ wget
+    sudo chroot _root /usr/bin/bash -ilc 'cd /root/pkgsrc/bootstrap && ./bootstrap --prefix /opt/qrpc/pkg --pkgdbdir /opt/qrpc/pkg/pkgdb --sysconfdir /opt/qrpc/pkg/etc --varbase /opt/qrpc/var'
+    sudo chroot _root /usr/bin/bash -ilc 'cd /root/pkgsrc/meta-pkgs/qrpc-devel && bmake install'
+    ;;
+  root)
+    sudo chroot _root /usr/bin/bash
+    ;;
+  clean)
+    export PATH=/opt/qrpc/pkg/bin:$PATH
+    rebar3 clean
+    ;;
+  build)
+    export PATH=/opt/qrpc/pkg/bin:$PATH
+    rebar3 compile
+    ;;
+  check)
+    export PATH=/opt/qrpc/pkg/bin:$PATH
+    rebar3 eunit && rebar3 ct --verbose && rebar3 cover && echo ALL_TEST_PASS
+    ;;
+  shell)
+    export PATH=/opt/qrpc/pkg/bin:$PATH
+    rebar3 shell
+    ;;
+  install)
+    export PATH=/opt/qrpc/pkg/bin:$PATH
+    rebar3 as prod tar
+    prod=$(ls -t _build/prod/rel/qrpc/*.tar.gz | head -1)
+    # Ensure system user and group exist for runtime
+    sudo getent group qrpc >/dev/null 2>&1 || sudo groupadd -r qrpc
+    sudo id -u qrpc >/dev/null 2>&1 || sudo useradd -r -g qrpc -d /opt/qrpc/home/qrpc -s /usr/sbin/nologin -M qrpc
+    # Ensure required directories exist with correct ownership
+    sudo install -d -o root -g root -m 0755 /opt/qrpc/home
+    sudo install -d -o qrpc -g qrpc -m 0750 /opt/qrpc/home/qrpc
+    sudo install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc/stdout
+    sudo install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc/stderr
+    sudo mkdir -p /opt/qrpc/rel
+    sudo mv "$prod" /opt/qrpc/rel/release.tar.gz
+    sudo tar -xzf "/opt/qrpc/rel/release.tar.gz" -C /opt/qrpc/rel
+    sudo rm "/opt/qrpc/rel/release.tar.gz"
+    sudo install -m0755 config/foreground.sh /opt/qrpc/qrpc_foreground.sh
+    sudo cp config/qrpc.service /etc/systemd/system/.
+    sudo systemctl daemon-reload
+    ;;
+  release)
+    export PATH=/opt/qrpc/pkg/bin:$PATH
+    rebar3 as prod release
+    ;;
+  *)
+    echo "this is a help message"
+    ;;
+esac
