@@ -74,8 +74,6 @@
         }
       , server_name := klsn:binstr()
       , type := response
-      % TODO: Here and below may not be available on error at the moment.
-      % But there must be a way to get them safely.
       , mode := mode()
       , protocol := protocol()
       , request_id := klsn:binstr()
@@ -86,7 +84,8 @@
 
 
 -spec rpc(rpc()) -> rpc().
-rpc(PartialReqRpc) ->
+rpc(PartialReqRpc0) ->
+    PartialReqRpc = safe_parse_req(PartialReqRpc0),
     try
         ReqRpc = parse_req(PartialReqRpc),
         ResRpc = proccess_rpc(ReqRpc),
@@ -120,11 +119,7 @@ gen_response_metadata(ReqRpc) ->
 
 
 -spec gen_error_detail(rpc(), qrpc_error:error()) -> response_metadata().
-gen_error_detail(PartialReqRpc, QrpcError) ->
-    Rpc = try parse_req(PartialReqRpc) catch
-        _:_ ->
-            PartialReqRpc
-    end,
+gen_error_detail(Rpc, QrpcError) ->
     klsn_map:filter(#{
         success => {value, false}
       , error_detail => {value, klsn_map:filter(#{
@@ -146,6 +141,66 @@ gen_error_detail(PartialReqRpc, QrpcError) ->
       , request_id => klsn_map:lookup([metadata, request_id], Rpc)
       , rpc_uuid => klsn_map:lookup([metadata, rpc_uuid], Rpc)
     }).
+
+
+-spec safe_parse_req(rpc()) -> rpc().
+safe_parse_req(Rpc0) ->
+    Rpc = case Rpc0 of
+        RpcMap when is_map(RpcMap) ->
+            RpcMap;
+        _ ->
+            #{}
+    end,
+    Lookup = fun
+        (Key, Map) when is_map(Map) ->
+            case klsn_map:lookup([Key], Map) of
+                none ->
+                    klsn_map:lookup([atom_to_binary(Key)], Map);
+                Found ->
+                    Found
+            end;
+        (_, _) ->
+            none
+    end,
+    GetAtom = fun(Key, Map, Atoms) ->
+        case Lookup(Key, Map) of
+            {value, Enum} when is_atom(Enum); is_binary(Enum) ->
+                SearchRes = lists:search(fun
+                    (Atom) ->
+                        klsn_binstr:from_any(Enum) =:= atom_to_binary(Atom)
+                end, Atoms),
+                case SearchRes of
+                    {value, Atom} ->
+                        Atom;
+                    false ->
+                        hd(Atoms)
+                end;
+            _ ->
+                hd(Atoms)
+        end
+    end,
+    Metadata0 = klsn_maybe:get_value(Lookup(metadata, Rpc), #{}),
+    Metadata = case Metadata0 of
+        MetadataMap when is_map(MetadataMap) ->
+            MetadataMap;
+        _ ->
+            #{}
+    end,
+    Rpc#{
+        metadata => Metadata#{
+            mode => GetAtom(mode, Metadata, [normal])
+          , protocol => GetAtom(protocol, Metadata, [native, http])
+          , request_id => case Lookup(request_id, Metadata) of
+                {value, RequestId} when is_binary(RequestId) ->
+                    RequestId;
+                {value, RequestId} ->
+                    iolist_to_binary(io_lib:format("~p", [RequestId]));
+                none ->
+                    klsn_binstr:uuid()
+            end
+          , rpc_uuid => klsn_binstr:uuid()
+        }
+    }.
 
 -spec parse_req(rpc()) -> rpc().
 parse_req(Rpc) ->
@@ -271,11 +326,12 @@ parse_req(Rpc) ->
             end)
           , request_id => Lookup([metadata, request_id], fun
                 ({value, Value}) when is_binary(Value) ->
-                    Value;
-                (none) ->
-                    klsn_binstr:uuid()
+                    Value
             end)
-          , rpc_uuid => klsn_binstr:uuid()
+          , rpc_uuid => Lookup([metadata, rpc_uuid], fun
+                ({value, Value}) when is_binary(Value) ->
+                    Value
+            end)
           , module => GetAtom([metadata, module], [])
           , function => GetAtom([metadata, function], [])
           , arity => Lookup([metadata, arity], fun
@@ -402,4 +458,3 @@ early_response(Rpc) ->
 -spec strip_rpc_for_log(rpc()) -> rpc().
 strip_rpc_for_log(Rpc) ->
     Rpc.
-
