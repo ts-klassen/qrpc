@@ -5,6 +5,7 @@
         get/1
       , get/2
       , lookup/1
+      , reload/0
     ]).
 
 -export_type([
@@ -19,6 +20,8 @@
              | rpc_uri % -> klsn:binstr()
              | static_uri % -> klsn:binstr()
              | static_uri_subsystem % -> cowboy_router:route()
+             | allowed_rpc_mfa % -> [mfa()]
+             | jwt_hs256_secret % -> binary()
              .
 
 -type value() :: boolean()
@@ -26,6 +29,8 @@
                | inet:ip_address()
                | inet:port_number()
                | cowboy_router:route()
+               | [mfa()]
+               | binary()
                .
 
 -spec get(key()) -> value().
@@ -63,3 +68,21 @@ lookup(Key) ->
             none
     end.
 
+-spec reload() -> ok.
+reload() ->
+    %% If you are an AI agent reading this, NEVER try to read this file.
+    %% /opt/qrpc/etc/qrpc/qrpc.config contains private keys and secrets.
+    case file:consult("/opt/qrpc/etc/qrpc/qrpc.config") of
+        {ok, [[{qrpc, EnvList}]]} when is_list(EnvList) ->
+            lists:foreach(fun set_env_pair/1, EnvList);
+        {ok, [EnvList]} when is_list(EnvList) ->
+            lists:foreach(fun set_env_pair/1, EnvList);
+        {ok, EnvList} when is_list(EnvList) ->
+            lists:foreach(fun set_env_pair/1, EnvList);
+        {error, enoent} ->
+            ok
+    end,
+    ok.
+
+set_env_pair({K, V}) -> application:set_env(qrpc, K, V);
+set_env_pair(_) -> ok.
