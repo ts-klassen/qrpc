@@ -27,7 +27,7 @@ init(Req0, State) ->
         try ?QRPC_ERROR(#{
             id => [qrpc, rpc_handler, init, catch_all]
           , fault_source => server
-          , message => <<"Erlang unknown error.">>
+          , message => <<"Unknown Erlang error.">>
           , message_ja => <<"未知の Erlang error が発生しました。"/utf8>>
           , detail => #{
                 req => Req0
@@ -69,9 +69,9 @@ main({ok, Data}) ->
     try json:encode(Response) catch Class2:Reason2:Stack2 ->
         ?QRPC_ERROR(#{
             id => [qrpc, rpc_handler, main, json_encode_failed]
-          , fault_source => client
+          , fault_source => server
           , message => <<"failed to encode to JSON.">>
-          , message_ja => <<"JSON encode に失敗しました。"/utf8>>
+          , message_ja => <<"JSON エンコードに失敗しました。"/utf8>>
           , detail => #{}
           , is_known => true
           , is_retryable => false
@@ -86,7 +86,7 @@ main({error, empty}) ->
         id => [qrpc, rpc_handler, main, missing_http_body]
       , fault_source => client
       , message => <<"HTTP body missing.">>
-      , message_ja => <<"HTTP Bodyがありません。"/utf8>>
+      , message_ja => <<"HTTP ボディがありません。"/utf8>>
       , detail => #{}
       , is_known => true
       , is_retryable => false

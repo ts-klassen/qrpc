@@ -88,7 +88,7 @@ rpc(PartialReqRpc0) ->
     PartialReqRpc = safe_parse_req(PartialReqRpc0),
     try
         ReqRpc = parse_req(PartialReqRpc),
-        ResRpc = proccess_rpc(ReqRpc),
+        ResRpc = process_rpc(ReqRpc),
         Metadata = gen_response_metadata(ReqRpc),
         #{
             qrpc_map_calls => #{module => qrpc_rpc, type => rpc, pos => head}
@@ -342,8 +342,8 @@ parse_req(Rpc) ->
       , payload => Lookup([payload], fun({value, Term}) -> Term end)
     }.
 
--spec proccess_rpc(rpc()) -> rpc().
-proccess_rpc(Rpc) ->
+-spec process_rpc(rpc()) -> rpc().
+process_rpc(Rpc) ->
     Module = Rpc:get([metadata, module]),
     Function = Rpc:get([metadata, function]),
     Arity = Rpc:get([metadata, arity]),
@@ -353,7 +353,7 @@ proccess_rpc(Rpc) ->
             ok;
         false ->
             ?QRPC_ERROR(#{
-                id => [qrpc, rpc, proccess_rpc, mfa_not_allowed]
+                id => [qrpc, rpc, process_rpc, mfa_not_allowed]
               , fault_source => client
               , message => <<"Call not allowed.">>
               , message_ja => <<"当該呼び出しは許可されていません。"/utf8>>
@@ -371,9 +371,9 @@ proccess_rpc(Rpc) ->
                 Module:Function(Rpc);
             _ ->
                 ?QRPC_ERROR(#{
-                    id => [qrpc, rpc, proccess_rpc, unimplemented, arity]
+                    id => [qrpc, rpc, process_rpc, unimplemented, arity]
                   , fault_source => server
-                  , message => <<"arity unimplemented.">>
+                  , message => <<"Unimplemented arity.">>
                   , message_ja => <<"未実装の arity です。"/utf8>>
                   , detail => #{
                         rpc => strip_rpc_for_log(Rpc)
@@ -399,7 +399,7 @@ proccess_rpc(Rpc) ->
                     erlang:raise(error, undef, Stack)
             end,
             ?QRPC_ERROR(#{
-                id => [qrpc, rpc, proccess_rpc, mfa_undef]
+                id => [qrpc, rpc, process_rpc, mfa_undef]
               , fault_source => server
               , message => <<"Undefined function.">>
               , message_ja => <<"存在しない関数です。"/utf8>>

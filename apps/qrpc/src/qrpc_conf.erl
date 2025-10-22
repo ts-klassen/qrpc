@@ -42,7 +42,7 @@ get(Key) ->
             ?QRPC_ERROR(#{
                 id => [qrpc, conf, get, missing]
               , fault_source => server
-              , message => <<"Missing server side config.">>
+              , message => <<"Missing server-side config.">>
               , message_ja => <<"サーバー側の設定が不足しています。"/utf8>>
               , is_known => true
               , is_retryable => false
