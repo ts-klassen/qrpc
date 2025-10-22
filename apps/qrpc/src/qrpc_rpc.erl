@@ -207,7 +207,7 @@ parse_req(Rpc) ->
     FieldError = fun
         (Path, none) ->
             ?QRPC_ERROR(#{
-                id => [qrpc, qpc, parse_req, missing_required_field] ++ Path
+                id => [qrpc, rpc, parse_req, missing_required_field] ++ Path
               , fault_source => client
               , message => <<"Missing required field.">>
               , message_ja => <<"必須のフィールドが欠損しています。"/utf8>>
@@ -221,7 +221,7 @@ parse_req(Rpc) ->
             });
         (Path, {value, BadValue}) ->
             ?QRPC_ERROR(#{
-                id => [qrpc, qpc, parse_req, invalid_field_type] ++ Path
+                id => [qrpc, rpc, parse_req, invalid_field_type] ++ Path
               , fault_source => client
               , message => <<"Invalid field type.">>
               , message_ja => <<"フィールドの型が不正です。"/utf8>>
@@ -242,7 +242,7 @@ parse_req(Rpc) ->
             try binary_to_existing_atom(Binary) catch
                 error:badarg:Stack ->
                     ?QRPC_ERROR(#{
-                        id => [qrpc, qpc, parse_req, unknown_atom] ++ Path
+                        id => [qrpc, rpc, parse_req, unknown_atom] ++ Path
                       , fault_source => client
                       , message => <<"Unknown Erlang atom.">>
                       , message_ja => <<"未知の Erlang atom が含まれます。"/utf8>>
@@ -269,7 +269,7 @@ parse_req(Rpc) ->
                     Atom;
                 false ->
                     ?QRPC_ERROR(#{
-                        id => [qrpc, qpc, parse_req, invalid_enum] ++ Path
+                        id => [qrpc, rpc, parse_req, invalid_enum] ++ Path
                       , fault_source => client
                       , message => <<"Invalid enum.">>
                       , message_ja => <<"不正な enum が含まれます。"/utf8>>
@@ -353,7 +353,7 @@ proccess_rpc(Rpc) ->
             ok;
         false ->
             ?QRPC_ERROR(#{
-                id => [qrpc, qpc, proccess_rpc, mfa_not_allowed]
+                id => [qrpc, rpc, proccess_rpc, mfa_not_allowed]
               , fault_source => client
               , message => <<"Call not allowed.">>
               , message_ja => <<"当該呼び出しは許可されていません。"/utf8>>
@@ -371,7 +371,7 @@ proccess_rpc(Rpc) ->
                 Module:Function(Rpc);
             _ ->
                 ?QRPC_ERROR(#{
-                    id => [qrpc, qpc, proccess_rpc, unimplemented, arity]
+                    id => [qrpc, rpc, proccess_rpc, unimplemented, arity]
                   , fault_source => server
                   , message => <<"arity unimplemented.">>
                   , message_ja => <<"未実装の arity です。"/utf8>>
@@ -399,7 +399,7 @@ proccess_rpc(Rpc) ->
                     erlang:raise(error, undef, Stack)
             end,
             ?QRPC_ERROR(#{
-                id => [qrpc, qpc, proccess_rpc, mfa_undef]
+                id => [qrpc, rpc, proccess_rpc, mfa_undef]
               , fault_source => server
               , message => <<"Undefined function.">>
               , message_ja => <<"存在しない関数です。"/utf8>>
@@ -423,7 +423,7 @@ get(Rpc, Path) ->
             Value;
         none ->
             ?QRPC_ERROR(#{
-                id => [qrpc, qpc, get, not_found]
+                id => [qrpc, rpc, get, not_found]
               , fault_source => server
               , message => <<"Missing backend specified field.">>
               , message_ja => <<"指定したフィールドが存在しませんでした。"/utf8>>
