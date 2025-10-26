@@ -20,8 +20,10 @@
              | rpc_uri % -> klsn:binstr()
              | static_uri % -> klsn:binstr()
              | static_uri_subsystem % -> cowboy_router:route()
-             | allowed_rpc_mfa % -> [mfa()]
+             | allowed_rpc_mfa % -> #{mfa() => #{ role := Role::atom() }}
              | jwt_hs256_secret % -> binary()
+             | tier % -> #{atom() => #{qrpc_counter:time_slot() => non_neg_integer()}}
+             | roles % -> [Role:atom()]
              .
 
 -type value() :: boolean()
@@ -31,6 +33,8 @@
                | cowboy_router:route()
                | [mfa()]
                | binary()
+               | #{atom() => #{qrpc_counter:time_slot() => non_neg_integer()}}
+               | [Role::atom()]
                .
 
 -spec get(key()) -> value().

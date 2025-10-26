@@ -1,9 +1,16 @@
 -module(qrpc_map_calls_tests).
+-export([
+    sample_function/1,
+    sample_function/2,
+    sample_function/3,
+    sample_add_function/2,
+    chain_add_function/2
+]).
 -include_lib("eunit/include/eunit.hrl").
 
 simple_test() ->
     Map = #{
-        qrpc_map_calls_tests => #{module => ?MODULE, pos => head}
+        qrpc_map_calls => #{module => ?MODULE, pos => head}
       , other_field => any
       , sample_number => 10
     },
@@ -16,7 +23,7 @@ simple_test() ->
 
 chain_test() ->
     Map = #{
-        qrpc_map_calls_tests => #{module => ?MODULE, pos => head}
+        qrpc_map_calls => #{module => ?MODULE, pos => head}
       , other_field => any
       , sample_number => 10
     },
@@ -32,6 +39,17 @@ chain_test() ->
                  :chain_add_function(3),
     ?assertEqual(Map#{sample_number := 16}, Chain3).
 
+external_maps_test() ->
+    Map = #{
+        qrpc_map_calls => #{module => maps, pos => tail}
+      , sample_number => 10
+    },
+    %% maps:get/2 expects Key, Map when pos=tail
+    ?assertEqual(10, Map:get(sample_number)),
+    %% maps:is_key/2 expects Key, Map when pos=tail
+    ?assert(Map:is_key(sample_number)),
+    ok.
+
 sample_function(Arg1) ->
     [Arg1].
 
@@ -46,4 +64,3 @@ sample_add_function(#{sample_number := A}, B) ->
 
 chain_add_function(#{sample_number := A}=Map, B) ->
     Map#{sample_number => A + B}.
-

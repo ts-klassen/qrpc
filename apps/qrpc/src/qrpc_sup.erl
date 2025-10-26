@@ -26,10 +26,17 @@ start_link() ->
 %%                  type => worker(),       % optional
 %%                  modules => modules()}   % optional
 init([]) ->
-    SupFlags = #{strategy => one_for_all,
-                 intensity => 0,
+    ChildSpecs = [
+        #{
+            id => qrpc_counter_1
+          , start => {qrpc_counter, start_link, []}
+          , restart => permanent
+          , type => worker
+        }
+    ],
+    SupFlags = #{strategy => one_for_one,
+                 intensity => length(ChildSpecs) + 1,
                  period => 1},
-    ChildSpecs = [],
     {ok, {SupFlags, ChildSpecs}}.
 
 %% internal functions

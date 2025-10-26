@@ -1,123 +1,105 @@
 -module(qrpc_map_calls).
 
--export([parse_transform/2]).
+%% Public API
+-export([parse_transform/2, map_call/3]).
 
-%% Parse transform that allows expressions like M:Fun(A1,...) where M can be a
-%% map at runtime. It rewrites such calls to a runtime-guarded case that:
-%%  - If M is a map: calls local Fun(Map, A1, ...)
-%%  - If M is an atom: performs the normal remote call M:Fun(A1,...)
-%%  - Otherwise: raises badarg
 %%
-%% Calls with a literal atom module (e.g., lists:reverse/1) are left unchanged.
+%% parse_transform/2
+%%
+%% Rewrites any remote call where the module expression is not an atom,
+%% from:   ModExpr:Fun(Args...)
+%% to:     qrpc_map_calls:map_call(ModExpr, Fun, [Args...])
+%%
+%% This keeps atom-module calls untouched. We do not attempt fallbacks;
+%% if the value is not a map with the expected metadata at runtime,
+%% the helper will crash fast as requested.
 
 -spec parse_transform(Forms :: [erl_parse:abstract_form()], _Options :: term()) ->
           [erl_parse:abstract_form()].
 parse_transform(Forms, _Options) ->
-    [transform_form(F) || F <- Forms].
+    lists:map(fun transform_form/1, Forms).
 
-transform_form({function, L, Name, Arity, Clauses}) ->
-    {function, L, Name, Arity, [transform_clause(C) || C <- Clauses]};
+%% Transform top-level form nodes. Only function bodies need traversal.
+transform_form({function, A, Name, Arity, Clauses}) ->
+    {function, A, Name, Arity, [transform_clause(C) || C <- Clauses]};
 transform_form(Other) ->
     Other.
 
-transform_clause({clause, Lc, Pats, Guards, Body}) ->
-    {clause, Lc, Pats, Guards, [transform_expr(E) || E <- Body]}.
+transform_clause({clause, A, Pats, Guards, Body}) ->
+    {clause, A, Pats, Guards, [transform_expr(E) || E <- Body]}.
 
-transform_expr({call, Lc, {remote, Lr, ModExpr, {atom, Lf, Fun}}, Args}) ->
-    case is_atom_ast(ModExpr) of
-        true ->
-            %% Normal atom module call: leave untouched, but still transform args
-            {call, Lc, {remote, Lr, ModExpr, {atom, Lf, Fun}},
-             [transform_expr(A) || A <- Args]};
-        false ->
-            %% Non-atom module position: emit runtime-guarded dispatch
-            ModT = transform_expr(ModExpr),
-            ArgsT = [transform_expr(A) || A <- Args],
-            build_runtime_dispatch(Lc, Lf, Lr, ModT, Fun, ArgsT)
+%% Recursively transform expressions
+transform_expr({call, A, {remote, AR, ModExpr, {atom, AF, Fun}}, Args}) ->
+    case ModExpr of
+        {atom, _, _} ->
+            %% Atom module: keep as-is
+            {call, A, {remote, AR, ModExpr, {atom, AF, Fun}}, [transform_expr(E) || E <- Args]};
+        _ ->
+            %% Dynamic module expr: rewrite to qrpc_map_calls:map_call(ModExpr, Fun, [Args...])
+            MapMod = {atom, AR, ?MODULE},
+            MapFun = {atom, AF, map_call},
+            TransformedArgs = [transform_expr(E) || E <- Args],
+            ArgsList = list_ast(TransformedArgs, A),
+            {call, A, {remote, AR, MapMod, MapFun}, [transform_expr(ModExpr), {atom, AF, Fun}, ArgsList]}
     end;
-transform_expr({call, Lc, Target, Args}) ->
-    %% Other calls: transform recursively inside
-    {call, Lc, transform_expr(Target), [transform_expr(A) || A <- Args]};
-transform_expr({tuple, L, Es}) ->
-    {tuple, L, [transform_expr(E) || E <- Es]};
-transform_expr({cons, L, H, T}) ->
-    {cons, L, transform_expr(H), transform_expr(T)};
-transform_expr({lc, L, Expr, Qs}) ->
-    {lc, L, transform_expr(Expr), [transform_expr(Q) || Q <- Qs]};
-transform_expr({bc, L, Expr, Qs}) ->
-    {bc, L, transform_expr(Expr), [transform_expr(Q) || Q <- Qs]};
-transform_expr({block, L, Es}) ->
-    {block, L, [transform_expr(E) || E <- Es]};
-transform_expr({'fun', L, {clauses, Clauses}}) ->
-    {'fun', L, {clauses, [transform_clause(C) || C <- Clauses]}};
-transform_expr({'if', L, Cs}) ->
-    {'if', L, [transform_clause(C) || C <- Cs]};
-transform_expr({'case', L, E, Cs}) ->
-    {'case', L, transform_expr(E), [transform_clause(C) || C <- Cs]};
-transform_expr({'receive', L, Cs}) ->
-    {'receive', L, [transform_clause(C) || C <- Cs]};
-transform_expr({'receive', L, Cs, To, Te}) ->
-    {'receive', L, [transform_clause(C) || C <- Cs], transform_expr(To), transform_expr(Te)};
-transform_expr({'try', L, Es, Cs, Hs, Af}) ->
-    {'try', L,
-     [transform_expr(E) || E <- Es],
-     [transform_clause(C) || C <- Cs],
-     [transform_clause(H) || H <- Hs],
-     [transform_expr(A) || A <- Af]};
-transform_expr({op, L, Op, A}) ->
-    {op, L, Op, transform_expr(A)};
-transform_expr({op, L, Op, A, B}) ->
-    {op, L, Op, transform_expr(A), transform_expr(B)};
-transform_expr({match, L, P, E}) ->
-    {match, L, P, transform_expr(E)};
-transform_expr(List) when is_list(List) ->
-    [transform_expr(E) || E <- List];
-transform_expr(Other) ->
-    Other.
+transform_expr({call, A, F, Args}) ->
+    {call, A, transform_expr(F), [transform_expr(E) || E <- Args]};
+transform_expr({lc, A, Expr, Quals}) ->
+    {lc, A, transform_expr(Expr), [transform_expr(Q) || Q <- Quals]};
+transform_expr({bc, A, Expr, Quals}) ->
+    {bc, A, transform_expr(Expr), [transform_expr(Q) || Q <- Quals]};
+transform_expr({'if', A, Clauses}) ->
+    {'if', A, [transform_clause(C) || C <- Clauses]};
+transform_expr({'case', A, Expr, Clauses}) ->
+    {'case', A, transform_expr(Expr), [transform_clause(C) || C <- Clauses]};
+transform_expr({'fun', A, {clauses, Clauses}}) ->
+    {'fun', A, {clauses, [transform_clause(C) || C <- Clauses]}};
+transform_expr({'receive', A, Clauses}) ->
+    {'receive', A, [transform_clause(C) || C <- Clauses]};
+transform_expr({'receive', A, Clauses, TimeoutExpr, TimeoutBody}) ->
+    {'receive', A,
+     [transform_clause(C) || C <- Clauses],
+     transform_expr(TimeoutExpr),
+     [transform_expr(E) || E <- TimeoutBody]};
+transform_expr({'try', A, Body, Clauses, Handlers, After}) ->
+    {'try', A,
+     [transform_expr(E) || E <- Body],
+     [transform_clause(C) || C <- Clauses],
+     [transform_clause(C) || C <- Handlers],
+     [transform_expr(E) || E <- After]};
+transform_expr({tuple, A, Es}) -> {tuple, A, [transform_expr(E) || E <- Es]};
+transform_expr({cons, A, H, T}) -> {cons, A, transform_expr(H), transform_expr(T)};
+transform_expr({list, A, Es}) -> {list, A, [transform_expr(E) || E <- Es]};
+transform_expr({op, A, Op, E}) -> {op, A, Op, transform_expr(E)};
+transform_expr({op, A, Op, L, R}) -> {op, A, Op, transform_expr(L), transform_expr(R)};
+transform_expr({match, A, L, R}) -> {match, A, transform_expr(L), transform_expr(R)};
+transform_expr({remote, A, L, R}) -> {remote, A, transform_expr(L), transform_expr(R)};
+transform_expr({block, A, Es}) -> {block, A, [transform_expr(E) || E <- Es]};
+transform_expr({map, A, Assocs}) -> {map, A, [transform_expr(E) || E <- Assocs]};
+transform_expr({map, A, Base, Assocs}) -> {map, A, transform_expr(Base), [transform_expr(E) || E <- Assocs]};
+transform_expr({map_field_assoc, A, K, V}) -> {map_field_assoc, A, transform_expr(K), transform_expr(V)};
+transform_expr({map_field_exact, A, K, V}) -> {map_field_exact, A, transform_expr(K), transform_expr(V)};
+transform_expr({record, A, Name, Fields}) -> {record, A, Name, [transform_expr(E) || E <- Fields]};
+transform_expr({record_field, A, Name, Val}) -> {record_field, A, Name, transform_expr(Val)};
+transform_expr({record_field, A, Rec, Name, Val}) -> {record_field, A, transform_expr(Rec), Name, transform_expr(Val)};
+transform_expr({record, A, Rec, Name, Fields}) -> {record, A, transform_expr(Rec), Name, [transform_expr(E) || E <- Fields]};
+transform_expr({bin, A, Elems}) -> {bin, A, [transform_expr(E) || E <- Elems]};
+transform_expr({bin_element, A, E, S, T}) -> {bin_element, A, transform_expr(E), S, T};
+transform_expr({clause, _, _, _, _}=C) -> transform_clause(C);
+transform_expr(Other) -> Other.
 
-is_atom_ast({atom, _, _}) -> true;
-is_atom_ast(_) -> false.
+list_ast([], A) -> {nil, A};
+list_ast([H|T], A) -> {cons, A, H, list_ast(T, A)}.
 
-build_runtime_dispatch(Lc, Lf, Lr, ModT, Fun, ArgsT) ->
-    %% Build:
-    %% case {M, A1, ...} of
-    %%   {Map, AA1,...} when is_map(Map) -> Fun(Map, AA1,...);
-    %%   {Mod, AA1,...} when is_atom(Mod) -> Mod:Fun(AA1,...);
-    %%   _ -> erlang:error(badarg)
-    %% end
-    Suf = erlang:unique_integer([monotonic, positive]),
-    VarM = mk_var(Lc, "__qrpc_m_", Suf),
-    VarAs = [mk_var(Lc, "__qrpc_a" ++ integer_to_list(I) ++ "_", Suf)
-             || I <- lists:seq(1, length(ArgsT))],
-
-    TupleExpr = mk_tuple(Lc, [ModT | ArgsT]),
-    PatTuple = mk_tuple(Lc, [VarM | VarAs]),
-
-    GuardIsMap = mk_guard_call(Lc, is_map, [VarM]),
-    GuardIsAtom = mk_guard_call(Lc, is_atom, [VarM]),
-
-    %% Clause 1 body: Fun(Map, AA1,...)
-    LocalFun = {atom, Lf, Fun},
-    CallLocal = {call, Lc, LocalFun, [VarM | VarAs]},
-    Cl1 = {clause, Lc, [PatTuple], [[GuardIsMap]], [CallLocal]},
-
-    %% Clause 2 body: Mod:Fun(AA1,...)
-    CallRemote = {call, Lc, {remote, Lr, VarM, {atom, Lf, Fun}}, VarAs},
-    Cl2 = {clause, Lc, [PatTuple], [[GuardIsAtom]], [CallRemote]},
-
-    %% Clause 3: badarg
-    Err = {call, Lc, {remote, Lr, {atom, Lr, erlang}, {atom, Lr, error}},
-           [{atom, Lc, badarg}]},
-    Cl3 = {clause, Lc, [{var, Lc, '_'}], [], [Err]},
-
-    {'case', Lc, TupleExpr, [Cl1, Cl2, Cl3]}.
-
-mk_var(L, Prefix, Suf) ->
-    Name = list_to_atom([$_ | Prefix] ++ integer_to_list(Suf)),
-    {var, L, Name}.
-
-mk_tuple(L, Es) ->
-    {tuple, L, Es}.
-
-mk_guard_call(L, Name, Args) ->
-    {call, L, {atom, L, Name}, Args}.
+%%
+%% Runtime helper invoked by transformed calls.
+%%
+-spec map_call(Map :: map(), Fun :: atom(), Args :: [term()]) -> term().
+map_call(Map, Fun, Args) when is_map(Map), is_atom(Fun), is_list(Args) ->
+    Cfg = maps:get(qrpc_map_calls, Map),
+    Mod = maps:get(module, Cfg),
+    Pos = maps:get(pos, Cfg),
+    case Pos of
+        head -> apply(Mod, Fun, [Map | Args]);
+        tail -> apply(Mod, Fun, Args ++ [Map])
+    end.

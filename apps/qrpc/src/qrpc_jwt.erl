@@ -12,6 +12,7 @@
       , get/2
       , lookup/2
       , set/3
+      , consume/1
     ]).
 
 -export_type([
@@ -35,6 +36,8 @@
 -type issue() :: #{
         ttl => pos_integer()
       , sub => klsn:binstr()
+      , tier => atom()
+      , role => atom()
     }.
 
 -type key() :: atom() | klsn:binstr().
@@ -50,10 +53,18 @@ issue(Opts) ->
       , <<"iat">> => {value, TimeNow}
       , <<"exp">> => case Opts of
             #{ttl := TTL} -> {value, TimeNow + TTL};
-            _ -> none
+            _ -> {value, TimeNow + 24 * 60 * 60}
         end
       , <<"jti">> => {value, klsn_binstr:uuid()}
       , <<"sub">> => klsn_map:lookup([sub], Opts)
+      , <<"tier">> => case klsn_map:lookup([tier], Opts) of
+            {value, Tier0} -> {value, klsn_binstr:from_any(Tier0)};
+            none -> none
+        end
+      , <<"role">> => case klsn_map:lookup([role], Opts) of
+            {value, Role0} -> {value, klsn_binstr:from_any(Role0)};
+            none -> none
+        end
     }).
 
 -spec encode(payload()) -> jwt().
@@ -141,9 +152,18 @@ decode(JWT = <<?HS256, ".", PS/binary>>) ->
               , version => 1
             })
     end,
-    Payload = Payload0#{
+    Payload1 = Payload0#{
         qrpc_map_calls => #{module => qrpc_jwt, type => payload, pos => head}
     },
+    %% Normalize tier/role to binstr if present
+    Payload2 = case Payload1:lookup(role) of
+        {value, R0} -> Payload1:set(role, klsn_binstr:from_any(R0));
+        none -> Payload1
+    end,
+    Payload = case Payload2:lookup(tier) of
+        {value, T0} -> Payload2:set(tier, klsn_binstr:from_any(T0));
+        none -> Payload2
+    end,
     Payload:validate(),
     Payload;
 decode(JWT) ->
@@ -242,6 +262,61 @@ set(Payload=?PAYLOAD, Key0, Value) ->
     Key = klsn_binstr:from_any(Key0),
     klsn_map:upsert([Key], Value, Payload).
 
+-spec consume(payload()) -> ok.
+consume(Payload=?PAYLOAD) ->
+    TierConf0 = qrpc_conf:get(tier, #{default => #{secondly => 1}}),
+    TierConf = maps:from_list(lists:map(fun({Key, Value}) ->
+        {klsn_binstr:from_any(Key), Value}
+    end, maps:to_list(TierConf0))),
+    Default = maps:get(<<"default">>, TierConf, #{secondly => 1}),
+    Policy = case Payload:lookup(tier) of
+        {value, Tier} ->
+            maps:get(klsn_binstr:from_any(Tier), TierConf, Default);
+        none ->
+            Default
+    end,
+    OptnlExp = maps:fold(fun(Key, Value, Acc) ->
+        {Id, Exp} = case Payload:lookup(sub) of
+            {value, Sub} ->
+                {Sub, qrpc_counter:parse_exp({slot, Key})};
+            none ->
+                {
+                    Payload:get(jti)
+                  , min(qrpc_counter:parse_exp({slot, Key}), Payload:get(exp))
+                }
+        end,
+        case qrpc_counter:add({?MODULE, jti, Id, Key}, Exp, 1) > Value of
+            true ->
+                case Acc of
+                    {value, AccExp} when AccExp > Exp ->
+                        Acc;
+                    _ ->
+                        {value, qrpc_counter:parse_exp({slot, Key})}
+                end;
+            false ->
+                Acc
+        end
+    end, none, Policy),
+    case OptnlExp of
+        {value, EExp} ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, jwt, consume, exceeded]
+              , fault_source => client
+              , message => <<"Rate limit exceeded.">>
+              , message_ja => <<"レートリミットに達しました。"/utf8>>
+              , detail => #{
+                    payload => Payload
+                }
+              , is_known => true
+              , is_retryable => true
+              , should_auto_retry => true
+              , retry_after => EExp - erlang:system_time(second) + 1
+              , version => 1
+            });
+        none ->
+            ok
+    end.
+
 -spec hs256(klsn:binstr()) -> klsn:binstr().
 hs256(Data) ->
     base64:encode(
@@ -253,4 +328,3 @@ hs256(Data) ->
         ),
         ?B64OPT
     ).
-

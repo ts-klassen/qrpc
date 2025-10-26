@@ -41,6 +41,7 @@
       , protocol => protocol() | klsn:binstr()
       , client_name => klsn:binstr()
       , request_id => klsn:binstr()
+      , jwt => qrpc_jwt:jwt()
       , module := module() | klsn:binstr()
       , function := atom() | klsn:binstr()
       , arity := non_neg_integer()
@@ -53,6 +54,7 @@
       , client_name := klsn:binstr()
       , request_id := klsn:binstr()
       , rpc_uuid := klsn:binstr()
+      , jwt := qrpc_jwt:payload()
       , module := module()
       , function := atom()
       , arity := non_neg_integer()
@@ -155,7 +157,7 @@ safe_parse_req(Rpc0) ->
         (Key, Map) when is_map(Map) ->
             case klsn_map:lookup([Key], Map) of
                 none ->
-                    klsn_map:lookup([atom_to_binary(Key)], Map);
+                    klsn_map:lookup([klsn_binstr:from_any(Key)], Map);
                 Found ->
                     Found
             end;
@@ -167,7 +169,7 @@ safe_parse_req(Rpc0) ->
             {value, Enum} when is_atom(Enum); is_binary(Enum) ->
                 SearchRes = lists:search(fun
                     (Atom) ->
-                        klsn_binstr:from_any(Enum) =:= atom_to_binary(Atom)
+                        klsn_binstr:from_any(Enum) =:= klsn_binstr:from_any(Atom)
                 end, Atoms),
                 case SearchRes of
                     {value, Atom} ->
@@ -262,7 +264,7 @@ parse_req(Rpc) ->
         (Binary, Path, Atoms) when is_binary(Binary); is_atom(Binary) ->
             SearchRes = lists:search(fun
                 (Atom) ->
-                    klsn_binstr:from_any(Binary) =:= atom_to_binary(Atom)
+                    klsn_binstr:from_any(Binary) =:= klsn_binstr:from_any(Atom)
             end, Atoms),
             case SearchRes of
                 {value, Atom} ->
@@ -332,6 +334,16 @@ parse_req(Rpc) ->
                 ({value, Value}) when is_binary(Value) ->
                     Value
             end)
+          , jwt => Lookup([metadata, jwt], fun
+                ({value, Value}) when is_binary(Value) ->
+                    qrpc_jwt:decode(Value);
+                (none) ->
+                    qrpc_jwt:issue(#{
+                        ttl => 60
+                      , tier => default
+                      , role => public
+                    })
+            end)
           , module => GetAtom([metadata, module], [])
           , function => GetAtom([metadata, function], [])
           , arity => Lookup([metadata, arity], fun
@@ -348,12 +360,29 @@ process_rpc(Rpc) ->
     Function = Rpc:get([metadata, function]),
     Arity = Rpc:get([metadata, arity]),
     Mfa = {Module, Function, Arity},
-    case lists:member(Mfa, qrpc_conf:get(allowed_rpc_mfa)) of
+    IsAllowed = case qrpc_conf:get(allowed_rpc_mfa) of
+        #{Mfa := #{role := public}} ->
+            true;
+        #{Mfa := #{role := Role}} ->
+            JWT = Rpc:get([metadata, jwt]),
+            JWT:consume(),
+            case JWT:lookup(role) of
+                {value, JWTRole} ->
+                    is_role_allowed(#{
+                        at_least => Role
+                      , provided => JWTRole
+                    });
+                none -> false
+            end;
+        _ ->
+            false
+    end,
+    case IsAllowed of
         true ->
             ok;
         false ->
             ?QRPC_ERROR(#{
-                id => [qrpc, rpc, process_rpc, mfa_not_allowed]
+                id => [qrpc, rpc, process_rpc, not_allowed]
               , fault_source => client
               , message => <<"Call not allowed.">>
               , message_ja => <<"当該呼び出しは許可されていません。"/utf8>>
@@ -449,6 +478,23 @@ get(Rpc, Path, Default) ->
 -spec lookup(rpc(), klsn_list:path()) -> klsn:optnl(term()).
 lookup(Rpc, Path) ->
     klsn_map:lookup(Path, Rpc).
+
+-spec is_role_allowed(#{
+        at_least := atom()
+      , provided := klsn:binstr() | atom()
+      , roles_left => [atom()]
+    }) -> boolean().
+is_role_allowed(#{at_least := Role, provided := JWTRole, roles_left := [Role|_]}) ->
+    klsn_binstr:from_any(Role) =:= klsn_binstr:from_any(JWTRole);
+is_role_allowed(#{at_least := Role, provided := JWTRole, roles_left := [H|T]}) ->
+    klsn_binstr:from_any(H) =:= klsn_binstr:from_any(JWTRole) orelse
+    is_role_allowed(#{at_least => Role, provided => JWTRole, roles_left => T});
+is_role_allowed(#{at_least := Role, provided := JWTRole}) ->
+    is_role_allowed(#{
+        at_least => Role
+      , provided => JWTRole
+      , roles_left => qrpc_conf:get(roles)
+    }).
 
 -spec early_response(rpc()) -> no_return().
 early_response(Rpc) ->
