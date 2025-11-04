@@ -118,7 +118,7 @@ main({error, Other}) ->
     }).
 
 on_qrpc_error(QrpcError) ->
-    json:encode(klsn_map:filter(#{
+    Metadata = klsn_map:filter(#{
         success => {value, false}
       , error_detail => {value, klsn_map:filter(#{
             uuid => klsn_map:lookup([metadata, uuid], QrpcError)
@@ -134,5 +134,9 @@ on_qrpc_error(QrpcError) ->
         })}
       , server_name => qrpc_conf:lookup(server_name)
       , type => {value, response}
-    })).
+    }),
+    json:encode(#{
+        metadata => Metadata
+      , payload => null
+    }).
 
