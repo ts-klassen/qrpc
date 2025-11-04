@@ -831,14 +831,14 @@
                 error: 'エラー',
                 message: 'メッセージ',
                 id: 'id',
-                faultSource: '責任主体'
+                faultInsights: 'エラーの種類'
             };
         }
         return {
             error: 'error',
             message: 'message',
             id: 'id',
-            faultSource: 'fault source'
+            faultInsights: 'fault insights'
         };
     }
 
@@ -861,6 +861,72 @@
             ? catalog[normalized]
             : '不明';
         return `${label} (${rawValue})`;
+    }
+
+    function capitalizeFirstChar(text) {
+        if (typeof text !== 'string' || text.length === 0) {
+            return text;
+        }
+        return text.charAt(0).toUpperCase() + text.slice(1);
+    }
+
+    function formatFaultInsights(detail, language) {
+        if (!detail || typeof detail !== 'object') {
+            return '';
+        }
+        const hasSource = !(detail.fault_source === null || typeof detail.fault_source === 'undefined');
+        const hasKnownFlag = typeof detail.is_known === 'boolean';
+        const hasRetryableFlag = typeof detail.is_retryable === 'boolean';
+
+        if (!hasSource && !hasKnownFlag && !hasRetryableFlag) {
+            return '';
+        }
+
+        if (language === 'ja') {
+            const sourceLabel = hasSource ? formatFaultSourceLabel(detail.fault_source, language) : '';
+            const segments = [];
+            if (sourceLabel) {
+                segments.push(`${sourceLabel} 起因で`);
+            }
+            if (hasKnownFlag) {
+                segments.push(detail.is_known ? '既知の' : '未知の');
+            }
+            if (hasRetryableFlag) {
+                segments.push(detail.is_retryable ? '一時エラー' : '恒久エラー');
+            } else {
+                segments.push('エラー');
+            }
+            let text = segments.join('');
+            if (text.endsWith('で')) {
+                text = text.slice(0, -1);
+            }
+            return text;
+        }
+
+        const descriptor = [];
+        if (hasKnownFlag) {
+            descriptor.push(detail.is_known ? 'known' : 'unknown');
+        }
+        if (hasRetryableFlag) {
+            descriptor.push(detail.is_retryable ? 'temporary' : 'permanent');
+        }
+        const descriptorText = descriptor.join(' ');
+        const sourceLabel = hasSource ? formatFaultSourceLabel(detail.fault_source, language) : '';
+
+        let englishOutput = '';
+        if (sourceLabel) {
+            if (descriptorText) {
+                englishOutput = `${descriptorText} error caused by ${sourceLabel}`;
+            } else {
+                englishOutput = `error caused by ${sourceLabel}`;
+            }
+        } else if (descriptorText) {
+            englishOutput = `${descriptorText} error`;
+        } else {
+            englishOutput = 'error';
+        }
+
+        return capitalizeFirstChar(englishOutput);
     }
 
     function normalizeArrayValue(value) {
@@ -949,7 +1015,7 @@
             return detail.message || detail.message_ja || fallback;
         })();
 
-        const formattedFaultSource = formatFaultSourceLabel(detail.fault_source, language);
+        const formattedFaultInsights = formatFaultInsights(detail, language);
 
         container.appendChild(createRow(labels.error, normalizedId));
         container.appendChild(createRow(labels.message, normalizedMessage));
@@ -962,7 +1028,7 @@
             append: uuidRowAppend
         }));
 
-        container.appendChild(createRow(labels.faultSource, formattedFaultSource));
+        container.appendChild(createRow(labels.faultInsights, formattedFaultInsights));
 
         return {
             content: container,
