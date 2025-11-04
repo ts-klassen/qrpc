@@ -16,7 +16,14 @@ start(_StartType, _StartArgs) ->
     Dispatch = cowboy_router:compile([
         {'_', lists:concat([
             [{"/qrpc", qrpc_rpc_handler, #{}}]
-          , [{"/qrpc/static/[...]", cowboy_static, {priv_dir, qrpc, "static"}}]
+          , lists:map(fun(SubSystem) ->
+                SSBin = klsn_binstr:from_any(SubSystem),
+                URI = klsn_binstr:replace(
+                    [{<<"/:subsystem/">>, <<"/", SSBin/binary, "/">>}]
+                  , qrpc_conf:get(static_uri, <<"/qrpc/:subsystem/static/[...]">>)
+                ),
+                {URI, cowboy_static, {priv_dir, SubSystem, "static"}}
+            end, qrpc_conf:get(static_uri_subsystem, []))
         ])}
     ]),
     {ok, _} = cowboy:start_clear(qrpc_http_listener,
