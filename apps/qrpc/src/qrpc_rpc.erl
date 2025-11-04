@@ -95,7 +95,7 @@ rpc(PartialReqRpc0) ->
         #{
             qrpc_map_calls => #{module => qrpc_rpc, type => rpc, pos => head}
           , metadata => Metadata
-          , payload => ResRpc:get([payload])
+          , payload => get(ResRpc, [payload])
         }
     catch
         ?QRPC_CATCH(QrpcError) ->
