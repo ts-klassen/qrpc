@@ -4,19 +4,26 @@ cd `dirname $0`
 
 case "$1" in
   bootstrap)
+    MAIN_USER=$USER;
+    if sudo mountpoint -q _pkgsrc; then
+      sudo umount _pkgsrc || sudo umount -l _pkgsrc || true
+    fi
     if sudo mountpoint -q _root/opt/qrpc; then
       sudo umount _root/opt/qrpc || sudo umount -l _root/opt/qrpc || true
     fi
     sudo rm -rf _root
     sudo rm -rf /opt/qrpc/pkg
     sudo apt-get update --allow-releaseinfo-change
-    sudo apt-get install -y debootstrap patch
+    sudo apt-get install -y debootstrap patch bindfs
     sudo debootstrap --variant=minbase jammy _root http://archive.ubuntu.com/ubuntu/
     sudo mkdir -p /opt/qrpc
     sudo mkdir -p _root/opt/qrpc
+    sudo chmod 700 _root
+    mkdir -p _pkgsrc
     sudo mount --bind /opt/qrpc _root/opt/qrpc
     sudo bash -c 'echo nameserver 8.8.8.8 >> _root/etc/resolv.conf'
     sudo git clone https://github.com/NetBSD/pkgsrc.git _root/root/pkgsrc
+    sudo bindfs --map=root/$MAIN_USER:@root/@$MAIN_USER _root/root/pkgsrc _pkgsrc
     sudo patch _root/root/pkgsrc/mk/defaults/mk.conf < config/mk.conf.patch
     sudo cp -r meta-pkgs/* _root/root/pkgsrc/meta-pkgs/.
     sudo bash -c 'echo >> _root/etc/bash.bashrc'
