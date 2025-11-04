@@ -11,8 +11,8 @@
 
 start(_StartType, _StartArgs) ->
     qrpc_conf:reload(),
-    Host = {127,0,0,1},
-    Port = 9080,
+    Host = qrpc_conf:get(listen_ip, {127,0,0,1}),
+    Port = qrpc_conf:get(listen_port, 9080),
     Dispatch = cowboy_router:compile([
         {'_', lists:concat([
             [{"/qrpc", qrpc_rpc_handler, #{}}]
