@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>q_tut Vue Hello</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+    <script src="/qrpc/qrpc/static/qrpc_vue_plugin.js"></script>
+</head>
+<body>
+    <div id="app">
+        <h1>{{ message }}</h1>
+        <p v-if="errorMessage">{{ errorMessage }}</p>
+    </div>
+    <script>
+        const { createApp } = Vue;
+        createApp({
+            data() {
+                return {
+                    message: 'Loading hello world...',
+                    errorMessage: null
+                };
+            },
+            mounted() {
+                if (!this.$qrpc) {
+                    this.message = 'QRPC plugin unavailable.';
+                    return;
+                }
+
+                const formatError = (error) => {
+                    const languageSetting = this.$qrpc?.settings?.get()?.language || 'en';
+                    const raw = (error?.messages && error.messages[languageSetting])
+                        || error?.metadata?.error_detail?.message
+                        || error?.detail?.message
+                        || error?.message
+                        || 'Unknown error.';
+                    return `Error: ${raw}`;
+                };
+
+                const setSecondaryError = (error) => {
+                    this.errorMessage = formatError(error);
+                };
+
+                this.$qrpc.callRpc({
+                    module: 'q_tut',
+                    function: 'hello_world',
+                    arity: 1,
+                    payload: {}
+                })
+                .then((data) => {
+                    this.message = data.payload ?? '(empty payload)';
+                    this.errorMessage = null;
+                    return this.$qrpc.callRpc({
+                        module: 'q_tut',
+                        function: 'hello_world',
+                        arity: 2,
+                        payload: {}
+                    })
+                    .then(() => {
+                        this.errorMessage = 'Unexpected success invoking arity 2.';
+                    })
+                    .catch((error) => {
+                        setSecondaryError(error);
+                    });
+                })
+                .catch((error) => {
+                    this.message = formatError(error);
+                    this.errorMessage = null;
+                });
+            }
+        }).use(QrpcVuePlugin).mount('#app');
+    </script>
+</body>
+</html>
