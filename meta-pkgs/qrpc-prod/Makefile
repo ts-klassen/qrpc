@@ -6,6 +6,7 @@ MAINTAINER=     qrpc@su-shiki.com
 COMMENT=        All you need to run qrpc as prod
 
 DEPENDS+=       cronolog>=1.6.2:../../www/cronolog
+DEPENDS+=       openssl>=3.6.0:../../security/openssl
 
 META_PACKAGE=   yes
 

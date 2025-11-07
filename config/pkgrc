@@ -1,0 +1,15 @@
+getent group qrpc >/dev/null 2>&1 || groupadd -r qrpc
+id -u qrpc >/dev/null 2>&1 || useradd -r -g qrpc -d /opt/qrpc/home/qrpc -s /usr/sbin/nologin -M qrpc
+install -d -o root -g root -m 0755 /opt/qrpc/home
+install -d -o qrpc -g qrpc -m 0750 /opt/qrpc/home/qrpc
+install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc/stdout
+install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc/stderr
+install -d -o qrpc -g qrpc -m 0750 /opt/qrpc/rel
+./pkg_add qrpc-prod-*.tgz
+tar -xzf qrpc.tgz -C /opt/qrpc/rel
+install -m0755 foreground.sh /opt/qrpc/qrpc_foreground.sh
+cp qrpc.service /etc/systemd/system/.
+systemctl daemon-reload
+systemctl restart qrpc
+
+echo INSTALL COMPLETE

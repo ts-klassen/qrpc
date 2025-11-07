@@ -1,5 +1,7 @@
 #!/usr/bin/bash
 
+set -euo pipefail
+
 cd `dirname $0`
 
 case "$1" in
@@ -53,25 +55,38 @@ case "$1" in
     export PATH=/opt/qrpc/pkg/bin:$PATH
     rebar3 shell
     ;;
-  install)
+  package)
     export PATH=/opt/qrpc/pkg/bin:$PATH
+    rm -rf _pkgsrc/packages/qrpc-prod
+    mkdir -p _pkgsrc/packages/qrpc-prod
+    sudo chroot _root /opt/qrpc/pkg/bin/pkg_tarup -d /root/pkgsrc/packages/qrpc-prod -a qrpc-prod
+    sudo chroot _root cp -p /opt/qrpc/pkg/sbin/pkg_add /root/pkgsrc/packages/qrpc-prod/.
     rebar3 as prod tar
     prod=$(ls -t _build/prod/rel/qrpc/*.tar.gz | head -1)
-    # Ensure system user and group exist for runtime
-    sudo getent group qrpc >/dev/null 2>&1 || sudo groupadd -r qrpc
-    sudo id -u qrpc >/dev/null 2>&1 || sudo useradd -r -g qrpc -d /opt/qrpc/home/qrpc -s /usr/sbin/nologin -M qrpc
-    # Ensure required directories exist with correct ownership
-    sudo install -d -o root -g root -m 0755 /opt/qrpc/home
-    sudo install -d -o qrpc -g qrpc -m 0750 /opt/qrpc/home/qrpc
-    sudo install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc/stdout
-    sudo install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc/stderr
-    sudo mkdir -p /opt/qrpc/rel
-    sudo mv "$prod" /opt/qrpc/rel/release.tar.gz
-    sudo tar -xzf "/opt/qrpc/rel/release.tar.gz" -C /opt/qrpc/rel
-    sudo rm "/opt/qrpc/rel/release.tar.gz"
-    sudo install -m0755 config/foreground.sh /opt/qrpc/qrpc_foreground.sh
-    sudo cp config/qrpc.service /etc/systemd/system/.
-    sudo systemctl daemon-reload
+    mv "$prod" _pkgsrc/packages/qrpc-prod/qrpc.tgz
+    cp config/pkgrc _pkgsrc/packages/qrpc-prod/.pkgrc
+    cp config/foreground.sh _pkgsrc/packages/qrpc-prod/foreground.sh
+    cp config/qrpc.service _pkgsrc/packages/qrpc-prod/qrpc.service
+    echo '#!/bin/bash
+        set -euo pipefail
+        cd $(dirname $0)
+        . .pkgrc
+    ' > _pkgsrc/packages/qrpc-prod/install.sh
+    chmod +x _pkgsrc/packages/qrpc-prod/install.sh
+    name="$(basename "${prod%.tar.gz}")-$(rustc -Vv | sed -n 's/^host: //p')"
+    mkdir -p _release_packages
+    mv _pkgsrc/packages/qrpc-prod "_release_packages/${name}"
+    cd _release_packages
+    tar -zcf "${name}.tar.gz" "$name"
+    rm -rf latest
+    mv "$name" latest
+    cd ..
+    echo "_release_packages/${name}.tar.gz"
+    ;;
+  install)
+    export PATH=/opt/qrpc/pkg/bin:$PATH
+    ./Build package
+    sudo _release_packages/latest/install.sh
     ;;
   release)
     export PATH=/opt/qrpc/pkg/bin:$PATH
