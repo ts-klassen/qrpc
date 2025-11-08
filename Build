@@ -24,7 +24,7 @@ case "$1" in
     mkdir -p _pkgsrc
     sudo mount --bind /opt/qrpc _root/opt/qrpc
     sudo bash -c 'echo nameserver 8.8.8.8 >> _root/etc/resolv.conf'
-    sudo git clone https://github.com/NetBSD/pkgsrc.git _root/root/pkgsrc
+    sudo git clone --depth 1 https://github.com/NetBSD/pkgsrc.git _root/root/pkgsrc
     sudo bindfs --map=root/$MAIN_USER:@root/@$MAIN_USER _root/root/pkgsrc _pkgsrc
     sudo patch _root/root/pkgsrc/mk/defaults/mk.conf < config/mk.conf.patch
     sudo cp -r meta-pkgs/* _root/root/pkgsrc/meta-pkgs/.
