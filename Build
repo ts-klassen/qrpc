@@ -59,6 +59,7 @@ case "$1" in
     export PATH=/opt/qrpc/pkg/bin:$PATH
     rm -rf _pkgsrc/packages/qrpc-prod
     mkdir -p _pkgsrc/packages/qrpc-prod
+    sudo chroot _root /usr/bin/bash -ilc 'cd /root/pkgsrc/meta-pkgs/qrpc-prod && bmake update'
     sudo chroot _root /opt/qrpc/pkg/bin/pkg_tarup -d /root/pkgsrc/packages/qrpc-prod -a qrpc-prod
     sudo chroot _root cp -p /opt/qrpc/pkg/sbin/pkg_add /root/pkgsrc/packages/qrpc-prod/.
     rebar3 as prod tar
