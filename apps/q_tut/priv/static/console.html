@@ -1,0 +1,114 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>QRPC Console</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+    <script src="/qrpc/qrpc/static/qrpc_vue_plugin.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        textarea {
+            width: 100%;
+            min-height: 180px;
+            font-family: monospace;
+            font-size: 14px;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            align-self: flex-start;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            background-color: #007bff;
+            color: #fff;
+            cursor: pointer;
+        }
+        button:disabled {
+            background-color: #7aa7e3;
+            cursor: not-allowed;
+        }
+        .status {
+            font-size: 14px;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <h1>QRPC Console</h1>
+        <p class="status">{{ status }}</p>
+        <label>
+            Request JSON
+            <textarea v-model="requestText" placeholder="{\n  &quot;module&quot;: &quot;q_tut&quot;,\n  &quot;function&quot;: &quot;hello_world&quot;,\n  &quot;arity&quot;: 1,\n  &quot;payload&quot;: {}\n}"></textarea>
+        </label>
+        <button :disabled="loading" @click="invoke">Invoke</button>
+        <label>
+            Raw Result
+            <textarea :value="responseText" readonly></textarea>
+        </label>
+    </div>
+    <script>
+        const { createApp } = Vue;
+        createApp({
+            data() {
+                return {
+                    requestText: JSON.stringify({
+                        module: 'q_tut',
+                        function: 'hello_world',
+                        arity: 1,
+                        payload: {}
+                    }, null, 2),
+                    responseText: '',
+                    status: 'Idle',
+                    loading: false
+                };
+            },
+            methods: {
+                stringifyRaw(value) {
+                    try {
+                        return JSON.stringify(value, null, 2);
+                    } catch (_) {
+                        return String(value);
+                    }
+                },
+                async invoke() {
+                    if (!this.$qrpc) {
+                        this.status = 'QRPC plugin unavailable.';
+                        return;
+                    }
+                    let config;
+                    try {
+                        config = JSON.parse(this.requestText);
+                    } catch (error) {
+                        this.status = 'Invalid JSON: ' + error.message;
+                        return;
+                    }
+                    this.loading = true;
+                    this.status = 'Calling...';
+                    try {
+                        const result = await this.$qrpc.callRpc(config);
+                        this.responseText = this.stringifyRaw(result);
+                        this.status = 'Success.';
+                    } catch (error) {
+                        this.responseText = this.stringifyRaw(error);
+                        this.status = 'Error.';
+                    } finally {
+                        this.loading = false;
+                    }
+                }
+            }
+        }).use(QrpcVuePlugin).mount('#app');
+    </script>
+</body>
+</html>
+
