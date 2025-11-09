@@ -33,12 +33,12 @@ case "$1" in
     fi
     ;;
   mount)
-    if ! sudo mountpoint -q _pkgsrc; then
+    if ! sudo mountpoint -q _root/opt/qrpc; then
       sudo mkdir -p /opt/qrpc
       sudo mkdir -p _root/opt/qrpc
       sudo mount --bind /opt/qrpc _root/opt/qrpc
     fi
-    if ! sudo mountpoint -q _root/opt/qrpc; then
+    if ! sudo mountpoint -q _pkgsrc; then
       MAIN_USER=$USER;
       sudo mkdir -p _root/root/pkgsrc
       mkdir -p _pkgsrc
