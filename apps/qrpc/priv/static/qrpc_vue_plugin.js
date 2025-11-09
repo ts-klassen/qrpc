@@ -8,6 +8,7 @@
         errorDisplay: 'toast'
     };
     const HISTORY_LIMIT = 20;
+    const CLIENT_ERROR_NAMESPACE = 'qrpc_client';
 
     function createRpcCaller(endpoint, { onError }) {
         return async function callRpc({ module, function: func, arity = 1, payload = {} }) {
@@ -25,47 +26,54 @@
             });
 
             try {
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
+                let response;
+                try {
+                    response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body
+                    });
+                } catch (networkError) {
+                    throw createNetworkTransportError(networkError);
                 }
 
-                const result = await response.json();
+                if (response.status !== 200) {
+                    throw createHttpStatusError(response);
+                }
+
+                let rawBody;
+                try {
+                    rawBody = await response.text();
+                } catch (readError) {
+                    throw createNetworkTransportError(readError);
+                }
+
+                const parseResult = parseResponseBody(rawBody);
+                let result = null;
+                if (parseResult.ok) {
+                    result = parseResult.value;
+                } else {
+                    throw createResponseParseError(parseResult.error);
+                }
 
                 const success = result?.metadata?.success;
                 if (success !== undefined && success !== true) {
-                    const metadataErrorDetail = result?.metadata?.error_detail;
-                    const responseErrorDetail = result?.error_detail;
-                    const message = metadataErrorDetail?.message ||
-                        responseErrorDetail?.message ||
-                        'Call failed.';
-                    const messageJa = metadataErrorDetail?.message_ja ||
-                        responseErrorDetail?.message_ja ||
-                        message;
-                    const error = new Error(message);
-                    error.detail = metadataErrorDetail || responseErrorDetail || null;
-                    error.metadata = result?.metadata || null;
-                    error.messages = {
-                        en: message,
-                        ja: messageJa
-                    };
-                    error.response = result;
-                    throw error;
+                    throw createQrpcResponseError(result);
+                }
+
+                if (!result && result !== null) {
+                    result = null;
                 }
 
                 return result;
             } catch (error) {
+                const normalized = ensureQrpcError(error);
                 if (typeof onError === 'function') {
-                    onError(error);
+                    onError(normalized);
                 }
-                throw error;
+                throw normalized;
             }
         };
     }
@@ -89,7 +97,7 @@
                         ja: resolveErrorMessage(error, 'ja')
                     },
                     metadata: error.metadata || null,
-                    detail: error.detail || null
+                    detail: error?.metadata?.error_detail || null
                 });
                 switch (settings.errorDisplay) {
                     case 'toast':
@@ -1191,33 +1199,180 @@
 
     function resolveErrorMessage(error, language = 'en') {
         const normalizedLang = language === 'ja' ? 'ja' : 'en';
-        if (error?.messages) {
-            return error.messages[normalizedLang] ||
-                error.messages.en ||
-                error.message ||
-                'An unexpected error occurred.';
-        }
-
         const metadataDetail = error?.metadata?.error_detail;
-        const responseDetail = error?.detail;
 
         if (normalizedLang === 'ja') {
-            const jaMessage = metadataDetail?.message_ja || responseDetail?.message_ja;
+            const jaMessage = metadataDetail?.message_ja;
             if (jaMessage) {
                 return jaMessage;
             }
         }
 
-        const enMessage = metadataDetail?.message || responseDetail?.message;
+        const enMessage = metadataDetail?.message;
         if (enMessage) {
             return enMessage;
         }
 
-        if (normalizedLang === 'ja' && error?.message_ja) {
-            return error.message_ja;
-        }
-
         return error?.message || 'An unexpected error occurred.';
+    }
+
+    function parseResponseBody(body) {
+        if (typeof body !== 'string') {
+            return { ok: true, value: body };
+        }
+        const trimmed = body.trim();
+        if (!trimmed) {
+            return {
+                ok: false,
+                error: new SyntaxError('Empty response body')
+            };
+        }
+        try {
+            return {
+                ok: true,
+                value: JSON.parse(body)
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                error
+            };
+        }
+    }
+
+    function createQrpcResponseError(result) {
+        const metadataErrorDetail = result?.metadata?.error_detail;
+        const responseErrorDetail = result?.error_detail;
+        const detail = metadataErrorDetail ||
+            responseErrorDetail ||
+            buildDefaultErrorDetail({
+                id: [CLIENT_ERROR_NAMESPACE, 'server_error', 'unknown'],
+                fault_source: 'server'
+            });
+        const message = detail?.message ||
+            metadataErrorDetail?.message ||
+            responseErrorDetail?.message ||
+            'Call failed.';
+        const error = new Error(message);
+        const metadata = Object.assign(
+            {
+                success: false
+            },
+            result?.metadata || {}
+        );
+        if (!metadata.error_detail && detail) {
+            metadata.error_detail = detail;
+        }
+        error.metadata = metadata;
+        return error;
+    }
+
+    function createNetworkTransportError(originalError) {
+        const error = createClientSideQrpcError({
+            idSegments: ['network', 'request_failed'],
+            faultSource: 'external',
+            message: 'Network request failed. Please check your connection.',
+            messageJa: 'ネットワーク要求に失敗しました。接続状況を確認してください。',
+            isRetryable: true
+        });
+        return error;
+    }
+
+    function createHttpStatusError(response) {
+        const status = typeof response?.status === 'number' ? response.status : 'unknown';
+        const statusText = response?.statusText || '';
+        const message = statusText
+            ? `Server responded with HTTP ${status} (${statusText}).`
+            : `Server responded with HTTP ${status}.`;
+        const messageJa = statusText
+            ? `サーバーから HTTP ${status}（${statusText}）が返されました。`
+            : `サーバーから HTTP ${status} が返されました。`;
+        const error = createClientSideQrpcError({
+            idSegments: ['http_status', String(status)],
+            faultSource: 'external',
+            message,
+            messageJa
+        });
+        error.status = status;
+        error.statusText = statusText;
+        error.response = response;
+        return error;
+    }
+
+    function createResponseParseError(parseError) {
+        const error = createClientSideQrpcError({
+            idSegments: ['response', 'parse_failed'],
+            faultSource: 'external',
+            message: 'Received an unreadable response from the server.',
+            messageJa: 'サーバーからのレスポンスを解析できませんでした。',
+        });
+        return error;
+    }
+
+    function ensureQrpcError(error) {
+        if (error?.metadata?.error_detail || error?.metadata?.success === false) {
+            return error;
+        }
+        return createClientSideQrpcError({
+            idSegments: ['unexpected'],
+            faultSource: 'client',
+            message: error?.message || 'An unexpected error occurred.',
+            messageJa: error?.message_ja
+        });
+    }
+
+    function createClientSideQrpcError(options = {}) {
+        const {
+            idSegments = ['error'],
+            faultSource = 'client',
+            message = 'Unknown error.',
+            messageJa,
+            isKnown = true,
+            isRetryable = false,
+            shouldAutoRetry = false
+        } = options;
+
+        const detail = buildDefaultErrorDetail({
+            id: [CLIENT_ERROR_NAMESPACE].concat(idSegments),
+            fault_source: faultSource,
+            message,
+            message_ja: messageJa || message,
+            is_known: Boolean(isKnown),
+            is_retryable: Boolean(isRetryable),
+            should_auto_retry: Boolean(shouldAutoRetry)
+        });
+
+        const metadata = {
+            success: false,
+            error_detail: detail,
+            server_name: null,
+            type: 'response',
+            mode: 'normal',
+            protocol: 'http',
+            request_id: detail.uuid,
+            rpc_uuid: detail.uuid
+        };
+
+        const error = new Error(detail.message);
+        error.metadata = metadata;
+        return error;
+    }
+
+    function buildDefaultErrorDetail(overrides = {}) {
+        const detail = Object.assign({
+            uuid: null,
+            id: [CLIENT_ERROR_NAMESPACE, 'generic'],
+            fault_source: 'unknown',
+            message: 'Unknown error.',
+            message_ja: '不明なエラー。',
+            is_known: false,
+            is_retryable: false,
+            should_auto_retry: false
+        }, overrides);
+        if (!Array.isArray(detail.id)) {
+            detail.id = [CLIENT_ERROR_NAMESPACE, 'generic'];
+        }
+        return detail;
     }
 
     global.QrpcVuePlugin = QrpcVuePlugin;
