@@ -85,6 +85,7 @@ case "$1" in
     cp config/pkgrc _pkgsrc/packages/qrpc-prod/.pkgrc
     cp config/foreground.sh _pkgsrc/packages/qrpc-prod/foreground.sh
     cp config/qrpc.service _pkgsrc/packages/qrpc-prod/qrpc.service
+    ./scripts/license_collector.sh gather _pkgsrc/packages/qrpc-prod qrpc.tgz
     echo '#!/bin/bash
         set -euo pipefail
         cd $(dirname $0)

@@ -7,6 +7,9 @@ COMMENT=        All you need to run qrpc as prod
 
 DEPENDS+=       cronolog>=1.6.2:../../www/cronolog
 DEPENDS+=       openssl>=3.6.0:../../security/openssl
+DEPENDS+=       pkg_install>=20250417:../../pkgtools/pkg_install
+
+LICENSE=        apache-2.0
 
 META_PACKAGE=   yes
 
