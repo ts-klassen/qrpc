@@ -5,6 +5,7 @@
         hello_world/1
       , hello_error/1
       , hello_admin/1
+      , hello_config/1
     ]).
 
 hello_world(_) ->
@@ -27,4 +28,15 @@ hello_error(Rpc) ->
 hello_admin(Rpc) ->
     #{ payload => Rpc:get([metadata, jwt]) }.
 
+hello_config(_Rpc) ->
+    #{ payload => #{
+        get => ?QRPC_SUBCONF_GET(hello_config)
+      , default => ?QRPC_SUBCONF_GET(non_existing_key, <<"default value">>)
+      , lookup => case ?QRPC_SUBCONF_LOOKUP(hello_config) of
+            {value, Value} ->
+                <<"value: ", Value/binary>>;
+            none ->
+                <<"This was not suppose to happen!">>
+        end
+    } }.
 

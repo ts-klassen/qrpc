@@ -96,7 +96,7 @@
       , should_auto_retry => boolean() % default false
       , retry_count => non_neg_integer() % 0 if first error.
       , retry_after => non_neg_integer() % sec from now. ex. 60
-      , detail => term % you can put whatever here.
+      , detail => term() % you can put whatever here.
       , class => error | exit | throw
       , reason => term()
       , stacktrace => erlang:stacktrace()

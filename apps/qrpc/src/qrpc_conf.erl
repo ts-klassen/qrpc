@@ -24,7 +24,10 @@
              | jwt_hs256_secret % -> binary()
              | tier % -> #{atom() => #{qrpc_counter:time_slot() => non_neg_integer()}}
              | roles % -> [Role:atom()]
+             | subsystem % -> #{ Subsystem::atom() => #{ module() => term() } }
              .
+
+-type path() :: [atom()].
 
 -type value() :: boolean()
                | klsn:binstr()
@@ -35,9 +38,10 @@
                | binary()
                | #{atom() => #{qrpc_counter:time_slot() => non_neg_integer()}}
                | [Role::atom()]
+               | #{atom() => #{atom() => term()}}
                .
 
--spec get(key()) -> value().
+-spec get(key() | path()) -> value().
 get(Key) ->
     case lookup(Key) of
         {value, Value} ->
@@ -50,11 +54,14 @@ get(Key) ->
               , message_ja => <<"サーバー側の設定が不足しています。"/utf8>>
               , is_known => true
               , is_retryable => false
+              , detail => #{
+                    key => Key
+                }
               , version => 1
             })
     end.
 
--spec get(key(), value()) -> value().
+-spec get(key() | path(), value()) -> value().
 get(Key, Default) ->
     case lookup(Key) of
         {value, Value} ->
@@ -63,14 +70,23 @@ get(Key, Default) ->
             Default
     end.
 
--spec lookup(key()) ->  klsn:optnl(value()).
-lookup(Key) ->
+-spec lookup(key() | path()) ->  klsn:optnl(value()).
+lookup([Key|Path]) when is_atom(Key) ->
+    case application:get_env(qrpc, Key) of
+        {ok, Value} ->
+            klsn_map:lookup(Path, Value);
+        undefined ->
+            none
+    end;
+lookup(Key) when is_atom(Key) ->
     case application:get_env(qrpc, Key) of
         {ok, Value} ->
             {value, Value};
         undefined ->
             none
-    end.
+    end;
+lookup(_) ->
+    none.
 
 -spec reload() -> ok.
 reload() ->
