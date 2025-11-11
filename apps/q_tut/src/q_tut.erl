@@ -13,7 +13,7 @@ hello_world(_) ->
 
 hello_error(Rpc) ->
     ?QRPC_ERROR(#{
-        id => [q_tut, q_tut, hello_error]
+        id => [q_tut, q_tut, hello_error, example_error]
       , fault_source => client
       , message => <<"hello error (An sample error)">>
       , message_ja => <<"hello error （エラーのサンプルです）"/utf8>>
