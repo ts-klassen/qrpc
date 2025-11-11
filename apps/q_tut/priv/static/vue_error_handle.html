@@ -50,12 +50,12 @@
                     this.errorMessage = null;
                     return this.$qrpc.callRpc({
                         module: 'q_tut',
-                        function: 'hello_world',
-                        arity: 2,
+                        function: 'hello_error',
+                        arity: 1,
                         payload: {}
                     })
                     .then(() => {
-                        this.errorMessage = 'Unexpected success invoking arity 2.';
+                        this.errorMessage = 'Unexpected success invoking hello_error.';
                     })
                     .catch((error) => {
                         this.setSecondaryError(error);
