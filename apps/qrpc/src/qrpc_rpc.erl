@@ -548,4 +548,26 @@ early_response(Rpc) ->
 
 -spec strip_rpc_for_log(rpc()) -> rpc().
 strip_rpc_for_log(Rpc) ->
-    Rpc.
+    case klsn_map:lookup([blob], Rpc) of
+        {value, Blob} ->
+            Rpc#{blob := strip_blob_for_log(Blob)};
+        none ->
+            Rpc
+    end.
+
+strip_blob_for_log(Blob) when is_map(Blob) ->
+    strip_blob_entry(Blob);
+strip_blob_for_log(BlobList) when is_list(BlobList) ->
+    [strip_blob_entry(B) || B <- BlobList];
+strip_blob_for_log(Blob) ->
+    Blob.
+
+strip_blob_entry(Blob) when is_map(Blob) ->
+    case maps:get(data, Blob, undefined) of
+        Data when is_binary(Data) ->
+            maps:remove(data, Blob);
+        _ ->
+            Blob
+    end;
+strip_blob_entry(Blob) ->
+    Blob.
