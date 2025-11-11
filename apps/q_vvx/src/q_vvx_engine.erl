@@ -41,6 +41,7 @@ super_simple_tts(Rpc) ->
               , version => 1
             })
     end,
+    SpeakerBin = klsn_binstr:from_any(Speaker),
     Text = Rpc:get([payload, <<"text">>]),
     case Text of
         Text0 when is_binary(Text0) andalso size(Text0) < 1500 -> ok;
@@ -58,17 +59,47 @@ super_simple_tts(Rpc) ->
               , version => 1
             })
     end,
+    case qrpc_counter:add({?MODULE, super_simple_tts, Base}, {slot, minutely}, size(Text)) of
+        Count when Count < 10000 -> ok;
+        Count ->
+            Exp = qrpc_counter:parse_exp({slot, minutely}),
+            ?QRPC_ERROR(#{
+                id => [q_vvx, engine, super_simple_tts, minutely_limit_exceeded]
+              , fault_source => server
+              , message => <<"minutely limit exceeded on server side">>
+              , message_ja => <<"サーバー全体が 1 分あたりの制限に達しました"/utf8>>
+              , detail => #{
+                    exp => Exp
+                  , count => Count
+                }
+              , is_known => true
+              , is_retryable => true
+              , should_auto_retry => true
+              , retry_after => Exp - erlang:system_time(second) + 1
+              , version => 1
+            })
+    end,
     AudioQueryUrl = <<
         Base/binary
-      , "?/audio_query?speaker="
-      , (klsn_binstr:from_any(Speaker))/binary
+      , "/audio_query?speaker="
+      , SpeakerBin/binary
       , "&text="
       , (klsn_binstr:urlencode(Text))/binary
     >>,
-    AudioQueryRes = httpc:request(get, {AudioQueryUrl, []}, [], [{body_format, binary}]),
+    AudioQueryRes = httpc:request(post, {AudioQueryUrl, [], "application/json", []}, [], [{body_format, binary}]),
     AudioQuery = case AudioQueryRes of
         {ok, {{_, 200, _}, _, AudioQuery0}} ->
-            AudioQuery0;
+            json:encode(#{
+                accent_phrases => maps:get(<<"accent_phrases">>, json:decode(AudioQuery0))
+              , speedScale => 1
+              , pitchScale => 0
+              , intonationScale => 1
+              , volumeScale => 2
+              , prePhonemeLength => 0.1
+              , postPhonemeLength => 0.1
+              , outputSamplingRate => 24000
+              , outputStereo => false
+            });
         _ ->
             ?QRPC_ERROR(#{
                 id => [q_vvx, engine, super_simple_tts, audio_query_failed]
@@ -83,7 +114,7 @@ super_simple_tts(Rpc) ->
               , version => 1
             })
     end,
-    AudioRes = httpc:request(post, {<<Base/binary, "/synthesis">>, [], "application/json", AudioQuery}, [], [{body_format, binary}]),
+    AudioRes = httpc:request(post, {<<Base/binary, "/synthesis?speaker=", SpeakerBin/binary>>, [], "application/json", AudioQuery}, [], [{body_format, binary}]),
     WAV = case AudioRes of
         {ok, {{_, 200, _}, _, WAV0}} ->
             WAV0;
@@ -101,7 +132,7 @@ super_simple_tts(Rpc) ->
               , version => 1
             })
     end,
-    #{
+    #{payload => #{
         base64_wav_audio => base64:encode(WAV)
-    }.
+    }}.
 
