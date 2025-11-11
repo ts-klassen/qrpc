@@ -19,6 +19,7 @@
       , request_metadata/0
       , response_metadata/0
       , payload/0
+      , blob/0
     ]).
 
 -type rpc() :: #{
@@ -27,6 +28,7 @@
                   | request_metadata()
                   | response_metadata()
       , payload := payload()
+      , blob => blob() | [blob()]
     }.
 
 -type type() :: request | response.
@@ -84,6 +86,12 @@
 
 -type payload() :: term().
 
+-type blob() :: #{
+        content_type => klsn:binstr()
+      , content_length => non_neg_integer()
+      , data := binary()
+    }.
+
 
 -spec rpc(rpc()) -> rpc().
 rpc(PartialReqRpc0) ->
@@ -92,10 +100,12 @@ rpc(PartialReqRpc0) ->
         ReqRpc = parse_req(PartialReqRpc),
         ResRpc = process_rpc(ReqRpc),
         Metadata = gen_response_metadata(ReqRpc),
+        Blob = normalized_blob(ResRpc),
         #{
             qrpc_map_calls => #{module => qrpc_rpc, type => rpc, pos => head}
           , metadata => Metadata
-          , payload => get(ResRpc, [payload])
+          , payload => get(ResRpc, [payload], null)
+          , blob => Blob
         }
     catch
         ?QRPC_CATCH(QrpcError) ->
@@ -119,6 +129,40 @@ gen_response_metadata(ReqRpc) ->
       , rpc_uuid => ReqRpc:get([metadata, rpc_uuid])
     }.
 
+
+-spec normalized_blob(rpc()) -> [blob()].
+normalized_blob(Rpc) ->
+    Blob0 = maps:get(blob, Rpc, []),
+    Blob10 = case Blob0 of
+        BlobInArray when is_list(BlobInArray) ->
+            BlobInArray;
+        BlobAsElement ->
+            [BlobAsElement]
+    end,
+    lists:map(fun
+        (B=#{data := Data}) when is_map(B), is_binary(Data) ->
+            Data = maps:get(data, B, <<>>),
+            #{
+                content_type => klsn_binstr:from_any(
+                    maps:get(content_type, B, <<"application/octet-stream">>)
+                )
+              , content_length => size(Data)
+              , data => Data
+            };
+        (B) ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, rpc, normalized_blob, invalid_blob]
+              , fault_source => server
+              , message => <<"server created an invalid blob">>
+              , message_ja => <<"サーバーが無効な Blob を生成しました"/utf8>>
+              , detail => #{
+                    blob => B
+                }
+              , is_known => false
+              , is_retryable => false
+              , version => 1
+            })
+    end, Blob10).
 
 -spec gen_error_detail(rpc(), qrpc_error:error()) -> response_metadata().
 gen_error_detail(Rpc, QrpcError) ->
@@ -352,6 +396,7 @@ parse_req(Rpc) ->
             end)
         }
       , payload => Lookup([payload], fun({value, Term}) -> Term end)
+      , blob => [] % No client blob allowed for now
     }.
 
 -spec process_rpc(rpc()) -> rpc().
