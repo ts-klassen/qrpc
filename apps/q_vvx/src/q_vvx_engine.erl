@@ -132,7 +132,10 @@ super_simple_tts(Rpc) ->
               , version => 1
             })
     end,
-    #{payload => #{
-        base64_wav_audio => base64:encode(WAV)
-    }}.
-
+    #{
+        payload => #{}
+      , blob => [#{
+            content_type => <<"audio/wav">>
+          , data => WAV
+        }]
+    }.

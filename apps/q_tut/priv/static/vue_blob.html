@@ -140,7 +140,7 @@
                             payload: { blob_count: Math.max(1, this.blobCount || 1) }
                         });
                         this.payload = JSON.stringify(result?.payload ?? null, null, 2);
-                        const descriptors = Array.isArray(result?.blob) ? result.blob : [];
+                        const descriptors = result?.blob || [];
                         this.blobs = await Promise.all(descriptors.map(async (descriptor, index) => {
                             let preview = '';
                             try {

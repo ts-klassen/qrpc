@@ -57,7 +57,8 @@
                     speakerId: 3,
                     loading: false,
                     audioUrl: null,
-                    error: null
+                    error: null,
+                    activeBlobDescriptor: null
                 };
             },
             methods: {
@@ -68,24 +69,15 @@
                         || error?.message
                         || '不明なエラーです。';
                 },
-                base64ToBlob(base64, mimeType) {
-                    const binary = atob(base64);
-                    const len = binary.length;
-                    const bytes = new Uint8Array(len);
-                    for (let i = 0; i < len; i++) {
-                        bytes[i] = binary.charCodeAt(i);
-                    }
-                    return new Blob([bytes], { type: mimeType });
-                },
                 async synthesize() {
                     if (!this.$qrpc) {
-                    this.error = 'QRPC プラグインが利用できません。';
-                    return;
-                }
-                if (!this.text.trim()) {
-                    this.error = 'テキストを入力してください。';
-                    return;
-                }
+                        this.error = 'QRPC プラグインが利用できません。';
+                        return;
+                    }
+                    if (!this.text.trim()) {
+                        this.error = 'テキストを入力してください。';
+                        return;
+                    }
                     this.loading = true;
                     this.error = null;
                     try {
@@ -98,18 +90,36 @@
                                 text: this.text
                             }
                         });
-                        const base64Audio = response?.payload?.base64_wav_audio;
-                        if (!base64Audio) {
+                        const blobDescriptors = response?.blob || [];
+                        const descriptor = blobDescriptors[0] || null;
+                        if (!descriptor) {
                             throw new Error('音声データが返されませんでした。');
                         }
-                        if (this.audioUrl) {
+                        if (this.audioUrl && this.activeBlobDescriptor) {
+                            this.activeBlobDescriptor.revokeObjectUrl?.(this.audioUrl);
+                        } else if (this.audioUrl) {
                             URL.revokeObjectURL(this.audioUrl);
                         }
-                        const blob = this.base64ToBlob(base64Audio, 'audio/wav');
-                        this.audioUrl = URL.createObjectURL(blob);
+                        const directUrl = descriptor.toObjectUrl?.();
+                        let audioUrl = directUrl;
+                        if (!audioUrl) {
+                            const buffer = descriptor.arrayBuffer
+                                ? await descriptor.arrayBuffer()
+                                : new ArrayBuffer(0);
+                            const blobInstance = descriptor.blob || new Blob([buffer], {
+                                type: descriptor.contentType || 'audio/wav'
+                            });
+                            audioUrl = URL.createObjectURL(blobInstance);
+                        }
+                        if (!audioUrl) {
+                            throw new Error('音声データの準備に失敗しました。');
+                        }
+                        this.audioUrl = audioUrl;
+                        this.activeBlobDescriptor = descriptor;
                     } catch (error) {
                         this.error = `エラー: ${this.formatError(error)}`;
                         this.audioUrl = null;
+                        this.activeBlobDescriptor = null;
                     } finally {
                         this.loading = false;
                     }
