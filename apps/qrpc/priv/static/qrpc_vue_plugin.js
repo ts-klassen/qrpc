@@ -9,6 +9,8 @@
     };
     const HISTORY_LIMIT = 20;
     const CLIENT_ERROR_NAMESPACE = 'qrpc_client';
+    const UTF8_DECODER = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null;
+    const UTF8_ENCODER = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
 
     function createRpcCaller(endpoint, { onError }) {
         return async function callRpc({ module, function: func, arity = 1, payload = {} }) {
@@ -39,24 +41,44 @@
                     throw createNetworkTransportError(networkError);
                 }
 
-                if (response.status !== 200) {
-                    throw createHttpStatusError(response);
-                }
+		        if (response.status !== 200) {
+		            throw createHttpStatusError(response);
+		        }
 
-                let rawBody;
-                try {
-                    rawBody = await response.text();
-                } catch (readError) {
-                    throw createNetworkTransportError(readError);
-                }
+		        const contentTypeHeader = response.headers.get('content-type') || '';
+		        let parseResult;
+		        if (isMultipartResponse(contentTypeHeader)) {
+		            let rawBuffer;
+		            try {
+		                rawBuffer = await response.arrayBuffer();
+		            } catch (readError) {
+		                throw createNetworkTransportError(readError);
+		            }
+		            parseResult = parseMultipartResponse(rawBuffer, contentTypeHeader);
+		        } else {
+		            let rawBody;
+		            try {
+		                rawBody = await response.text();
+		            } catch (readError) {
+		                throw createNetworkTransportError(readError);
+		            }
+		            parseResult = parseResponseBody(rawBody);
+		        }
 
-                const parseResult = parseResponseBody(rawBody);
-                let result = null;
-                if (parseResult.ok) {
-                    result = parseResult.value;
-                } else {
-                    throw createResponseParseError(parseResult.error);
-                }
+		        let result = null;
+		        if (parseResult.ok) {
+		            result = parseResult.value;
+		        } else {
+		            throw createResponseParseError(parseResult.error);
+		        }
+
+		        if (result && typeof result === 'object' && !Array.isArray(result.blob)) {
+		            if (Object.prototype.hasOwnProperty.call(result, 'blob')) {
+		                result.blob = result.blob == null ? [] : [result.blob];
+		            } else {
+		                result.blob = [];
+		            }
+		        }
 
                 const success = result?.metadata?.success;
                 if (success !== undefined && success !== true) {
@@ -1238,6 +1260,251 @@
                 error
             };
         }
+    }
+
+    function isMultipartResponse(contentTypeHeader) {
+        if (!contentTypeHeader) {
+            return false;
+        }
+        return contentTypeHeader.toLowerCase().startsWith('multipart/');
+    }
+
+    function parseMultipartResponse(buffer, contentTypeHeader) {
+        const boundary = extractBoundary(contentTypeHeader);
+        if (!boundary) {
+            return {
+                ok: false,
+                error: new Error('Multipart response missing boundary definition.')
+            };
+        }
+        try {
+            const parts = readMultipartParts(buffer, boundary);
+            if (!parts.length) {
+                throw new Error('Multipart response did not include any body sections.');
+            }
+            const jsonPart = parts[0];
+            const jsonText = decodeBytes(jsonPart.body);
+            const jsonResult = parseResponseBody(jsonText);
+            if (!jsonResult.ok) {
+                return jsonResult;
+            }
+            const base = Object.assign({}, jsonResult.value || {});
+            base.blob = parts.slice(1).map((part, index) => createBlobDescriptor(part, index));
+            return {
+                ok: true,
+                value: base
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                error
+            };
+        }
+    }
+
+    function extractBoundary(contentTypeHeader) {
+        const match = /boundary=(?:"([^\"]+)"|([^;]+))/i.exec(contentTypeHeader);
+        if (!match) {
+            return null;
+        }
+        return (match[1] || match[2] || '').trim();
+    }
+
+    function readMultipartParts(buffer, boundary) {
+        const bytes = new Uint8Array(buffer);
+        const delimiter = encodeUtf8(`--${boundary}`);
+        const parts = [];
+        let searchFrom = indexOfBytes(bytes, delimiter, 0);
+        if (searchFrom === -1) {
+            return parts;
+        }
+        while (searchFrom >= 0 && searchFrom < bytes.length) {
+            const boundaryEnd = searchFrom + delimiter.length;
+            if (isFinalBoundary(bytes, delimiter, searchFrom)) {
+                break;
+            }
+            const partStart = skipLineBreak(bytes, boundaryEnd);
+            const nextBoundaryStart = indexOfBytes(bytes, delimiter, partStart);
+            if (nextBoundaryStart === -1) {
+                break;
+            }
+            let partEnd = nextBoundaryStart;
+            if (partEnd >= 2 && bytes[partEnd - 2] === 13 && bytes[partEnd - 1] === 10) {
+                partEnd -= 2;
+            } else if (partEnd >= 1 && bytes[partEnd - 1] === 10) {
+                partEnd -= 1;
+            }
+            const safeStart = Math.max(partStart, 0);
+            const safeEnd = Math.max(partEnd, safeStart);
+            const segment = bytes.slice(safeStart, safeEnd);
+            parts.push(parseMultipartSegment(segment));
+            searchFrom = nextBoundaryStart;
+            if (isFinalBoundary(bytes, delimiter, nextBoundaryStart)) {
+                break;
+            }
+        }
+        return parts;
+    }
+
+    function isFinalBoundary(bytes, delimiter, index) {
+        const end = index + delimiter.length;
+        if (end + 1 >= bytes.length) {
+            return true;
+        }
+        return bytes[end] === 45 && bytes[end + 1] === 45;
+    }
+
+    function parseMultipartSegment(segmentBytes) {
+        const split = findHeaderBodySplit(segmentBytes);
+        const headerBytes = segmentBytes.slice(0, split.headerEnd);
+        const bodyBytes = segmentBytes.slice(split.bodyStart);
+        const headers = parsePartHeaders(decodeBytes(headerBytes));
+        return {
+            headers,
+            body: bodyBytes
+        };
+    }
+
+    function findHeaderBodySplit(bytes) {
+        for (let i = 0; i <= bytes.length - 4; i += 1) {
+            if (bytes[i] === 13 && bytes[i + 1] === 10 && bytes[i + 2] === 13 && bytes[i + 3] === 10) {
+                return { headerEnd: i, bodyStart: i + 4 };
+            }
+        }
+        for (let i = 0; i <= bytes.length - 2; i += 1) {
+            if (bytes[i] === 10 && bytes[i + 1] === 10) {
+                return { headerEnd: i, bodyStart: i + 2 };
+            }
+        }
+        return { headerEnd: 0, bodyStart: 0 };
+    }
+
+    function parsePartHeaders(text) {
+        const headers = {};
+        if (!text) {
+            return headers;
+        }
+        text.split(/\r?\n/).forEach((line) => {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                return;
+            }
+            const separatorIndex = trimmed.indexOf(':');
+            if (separatorIndex === -1) {
+                return;
+            }
+            const name = trimmed.slice(0, separatorIndex).trim().toLowerCase();
+            const value = trimmed.slice(separatorIndex + 1).trim();
+            if (name) {
+                headers[name] = value;
+            }
+        });
+        return headers;
+    }
+
+    function createBlobDescriptor(part, index) {
+        const headers = part.headers || {};
+        const contentType = headers['content-type'] || 'application/octet-stream';
+        const headerLength = headers['content-length'];
+        const declaredLength = typeof headerLength === 'string' ? parseInt(headerLength, 10) : undefined;
+        const dataBytes = part.body || new Uint8Array(0);
+        const inferredLength = Number.isFinite(declaredLength) ? declaredLength : dataBytes.length;
+        const blobInstance = typeof Blob !== 'undefined' ? new Blob([dataBytes], { type: contentType }) : null;
+        const arrayBufferProvider = () => dataBytes.buffer.slice(
+            dataBytes.byteOffset,
+            dataBytes.byteOffset + dataBytes.byteLength
+        );
+        const descriptor = {
+            index,
+            headers,
+            contentType,
+            contentLength: inferredLength,
+            size: dataBytes.length,
+            blob: blobInstance,
+            toUint8Array: () => new Uint8Array(dataBytes),
+            arrayBuffer: async () => arrayBufferProvider(),
+            asText: async () => decodeBytes(dataBytes),
+            asJson: async () => JSON.parse(decodeBytes(dataBytes)),
+            toObjectUrl: () => {
+                if (!blobInstance || !global.URL || typeof global.URL.createObjectURL !== 'function') {
+                    return null;
+                }
+                return global.URL.createObjectURL(blobInstance);
+            },
+            revokeObjectUrl: (url) => {
+                if (url && global.URL && typeof global.URL.revokeObjectURL === 'function') {
+                    global.URL.revokeObjectURL(url);
+                }
+            }
+        };
+        return descriptor;
+    }
+
+    function decodeBytes(bytes, encoding = 'utf-8') {
+        if (!bytes || bytes.length === 0) {
+            return '';
+        }
+        if (typeof TextDecoder !== 'undefined') {
+            try {
+                if (encoding === 'utf-8' && UTF8_DECODER) {
+                    return UTF8_DECODER.decode(bytes);
+                }
+                const decoder = new TextDecoder(encoding);
+                return decoder.decode(bytes);
+            } catch (_) {
+                if (UTF8_DECODER) {
+                    return UTF8_DECODER.decode(bytes);
+                }
+            }
+        }
+        let result = '';
+        for (let i = 0; i < bytes.length; i += 1) {
+            result += String.fromCharCode(bytes[i]);
+        }
+        return result;
+    }
+
+    function encodeUtf8(input) {
+        if (UTF8_ENCODER) {
+            return UTF8_ENCODER.encode(input);
+        }
+        const bytes = new Uint8Array(input.length);
+        for (let i = 0; i < input.length; i += 1) {
+            bytes[i] = input.charCodeAt(i) & 0xff;
+        }
+        return bytes;
+    }
+
+    function indexOfBytes(source, pattern, fromIndex) {
+        if (!pattern || pattern.length === 0) {
+            return -1;
+        }
+        for (let i = Math.max(0, fromIndex); i <= source.length - pattern.length; i += 1) {
+            let matched = true;
+            for (let j = 0; j < pattern.length; j += 1) {
+                if (source[i + j] !== pattern[j]) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    function skipLineBreak(bytes, index) {
+        if (index >= bytes.length) {
+            return bytes.length;
+        }
+        if (bytes[index] === 13 && index + 1 < bytes.length && bytes[index + 1] === 10) {
+            return index + 2;
+        }
+        if (bytes[index] === 10) {
+            return index + 1;
+        }
+        return index;
     }
 
     function createQrpcResponseError(result) {

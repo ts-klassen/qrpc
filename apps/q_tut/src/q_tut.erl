@@ -6,6 +6,7 @@
       , hello_error/1
       , hello_admin/1
       , hello_config/1
+      , hello_blob/1
     ]).
 
 hello_world(_) ->
@@ -39,4 +40,14 @@ hello_config(_Rpc) ->
                 <<"This was not suppose to happen!">>
         end
     } }.
+
+hello_blob(Rpc) ->
+    BlobCount = max(1, Rpc:get([payload, <<"blob_count">>], 1)),
+    #{
+       payload => #{ blob_count => BlobCount }
+     , blob => lists:map(fun(I) ->
+           Ibin = klsn_binstr:from_any(I),
+           #{ data => <<"hello blob ", Ibin/binary>> }
+       end, lists:seq(1, BlobCount))
+    }.
 

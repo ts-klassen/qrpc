@@ -20,7 +20,7 @@ init(Req0, State) ->
         false ->
             {{error, empty}, Req0}
     end,
-    ResponseData = try main(Body) catch
+    Response = try main(Body) catch
         ?QRPC_CATCH(QrpcError) ->
             on_qrpc_error(QrpcError);
         Class:Reason:Stack ->
@@ -43,9 +43,15 @@ init(Req0, State) ->
             on_qrpc_error(QrpcError)
         end
     end,
-    Req = cowboy_req:reply(200, #{
-        <<"content-type">> => <<"application/json">>
-    }, ResponseData, Req10),
+    {Headers, ResponseBody} = case Response of
+        {RespHeaders, RespBody} ->
+            {RespHeaders, RespBody};
+        Binary when is_binary(Binary); is_list(Binary) ->
+            {#{
+                <<"content-type">> => <<"application/json">>
+            }, Binary}
+    end,
+    Req = cowboy_req:reply(200, Headers, ResponseBody, Req10),
     {ok, Req, State}.
 
 main({ok, Data}) ->
@@ -66,21 +72,7 @@ main({ok, Data}) ->
     end,
     Request10 = klsn_map:upsert([metadata, protocol], http, Request0),
     Response = qrpc:rpc(Request10),
-    try json:encode(Response) catch Class2:Reason2:Stack2 ->
-        ?QRPC_ERROR(#{
-            id => [qrpc, rpc_handler, main, json_encode_failed]
-          , fault_source => server
-          , message => <<"failed to encode to JSON.">>
-          , message_ja => <<"JSON エンコードに失敗しました。"/utf8>>
-          , detail => #{}
-          , is_known => true
-          , is_retryable => false
-          , class => Class2
-          , reason => Reason2
-          , stacktrace => Stack2
-          , version => 1
-        })
-    end;
+    build_http_response(Response);
 main({error, empty}) ->
     ?QRPC_ERROR(#{
         id => [qrpc, rpc_handler, main, missing_http_body]
@@ -135,8 +127,82 @@ on_qrpc_error(QrpcError) ->
       , server_name => qrpc_conf:lookup(server_name)
       , type => {value, response}
     }),
-    json:encode(#{
-        metadata => Metadata
-      , payload => null
-    }).
+    JsonBody = encode_json_payload(Metadata, null),
+    {#{
+        <<"content-type">> => <<"application/json">>
+    }, JsonBody}.
 
+build_http_response(Response) ->
+    Metadata = maps:get(metadata, Response, #{}),
+    Payload = maps:get(payload, Response, null),
+    BlobList = normalize_blob_list(maps:get(blob, Response, [])),
+    JsonBody = encode_json_payload(Metadata, Payload),
+    case BlobList of
+        [] ->
+            {#{
+                <<"content-type">> => <<"application/json">>
+            }, JsonBody};
+        _ ->
+            build_multipart_response(JsonBody, BlobList)
+    end.
+
+encode_json_payload(Metadata, Payload) ->
+    try json:encode(#{
+        metadata => Metadata
+      , payload => Payload
+    }) catch Class:Reason:Stack ->
+        ?QRPC_ERROR(#{
+            id => [qrpc, rpc_handler, encode_json_payload, json_encode_failed]
+          , fault_source => server
+          , message => <<"failed to encode to JSON.">>
+          , message_ja => <<"JSON エンコードに失敗しました。"/utf8>>
+          , detail => #{
+                metadata => Metadata
+              , payload => Payload
+            }
+          , is_known => true
+          , is_retryable => false
+          , class => Class
+          , reason => Reason
+          , stacktrace => Stack
+          , version => 1
+        })
+    end.
+
+build_multipart_response(JsonBody, BlobList) ->
+    Boundary = multipart_boundary(),
+    Parts = [multipart_json_part(Boundary, JsonBody) |
+        lists:map(fun (Blob) -> multipart_blob_part(Boundary, Blob) end, BlobList)],
+    Body = [Parts, "--", Boundary, "--\r\n"],
+    {#{
+        <<"content-type">> => <<"multipart/mixed; boundary=", Boundary/binary>>
+    }, Body}.
+
+multipart_json_part(Boundary, JsonBody) ->
+    ["--", Boundary, "\r\n",
+     "Content-Type: application/json\r\n",
+     "Content-Length: ", integer_to_binary(iolist_size(JsonBody)), "\r\n\r\n",
+     JsonBody, "\r\n"].
+
+multipart_blob_part(Boundary, Blob=#{data := Data}) ->
+    ContentType = maps:get(content_type, Blob, <<"application/octet-stream">>),
+    ContentLength = maps:get(content_length, Blob, size(Data)),
+    ["--", Boundary, "\r\n",
+     "Content-Type: ", ContentType, "\r\n",
+     "Content-Length: ", integer_to_binary(ContentLength), "\r\n\r\n",
+     Data, "\r\n"].
+
+normalize_blob_list(BlobList) when is_list(BlobList) ->
+    BlobList;
+normalize_blob_list(BlobMap) when is_map(BlobMap) ->
+    [BlobMap];
+normalize_blob_list(_) ->
+    [].
+
+multipart_boundary() ->
+    iolist_to_binary([
+        "qrpc-boundary-",
+        integer_to_binary(erlang:system_time()),
+        "-",
+        integer_to_binary(erlang:unique_integer([positive]))
+    ]).
