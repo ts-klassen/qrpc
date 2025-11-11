@@ -16,7 +16,7 @@
         createApp({
             data() {
                 return {
-                    message: 'Loading hello world...',
+                    message: 'Triggering hello_error...',
                     errorMessage: null
                 };
             },
@@ -28,9 +28,6 @@
                         || error?.message
                         || 'Unknown error.';
                     return `Error: ${raw}`;
-                },
-                setSecondaryError(error) {
-                    this.errorMessage = this.formatError(error);
                 }
             },
             mounted() {
@@ -41,29 +38,17 @@
 
                 this.$qrpc.callRpc({
                     module: 'q_tut',
-                    function: 'hello_world',
+                    function: 'hello_error',
                     arity: 1,
                     payload: {}
                 })
-                .then((data) => {
-                    this.message = data.payload ?? '(empty payload)';
+                .then(() => {
+                    this.message = 'Unexpected success invoking hello_error.';
                     this.errorMessage = null;
-                    return this.$qrpc.callRpc({
-                        module: 'q_tut',
-                        function: 'hello_error',
-                        arity: 1,
-                        payload: {}
-                    })
-                    .then(() => {
-                        this.errorMessage = 'Unexpected success invoking hello_error.';
-                    })
-                    .catch((error) => {
-                        this.setSecondaryError(error);
-                    });
                 })
                 .catch((error) => {
-                    this.message = this.formatError(error);
-                    this.errorMessage = null;
+                    this.message = 'Received expected error response.';
+                    this.errorMessage = this.formatError(error);
                 });
             }
         }).use(QrpcVuePlugin).mount('#app');
