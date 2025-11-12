@@ -24,6 +24,8 @@
              | jwt_hs256_secret % -> binary()
              | tier % -> #{atom() => #{qrpc_counter:time_slot() => non_neg_integer()}}
              | roles % -> [Role:atom()]
+             | dlog_config % -> #{atom() => disk_log:dlog_options()}
+             | dlog_dir % -> file:filename()
              | subsystem % -> #{ Subsystem::atom() => #{ module() => term() } }
              .
 
@@ -38,6 +40,8 @@
                | binary()
                | #{atom() => #{qrpc_counter:time_slot() => non_neg_integer()}}
                | [Role::atom()]
+               | file:filename()
+               | #{atom() => disk_log:dlog_options()}
                | #{atom() => #{atom() => term()}}
                .
 
