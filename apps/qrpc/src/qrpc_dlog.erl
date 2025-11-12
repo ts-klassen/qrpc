@@ -9,32 +9,31 @@
 -export_type([
         name/0
       , entry/0
-      , open_ret/0
     ]).
 
 -type name() :: atom().
 
 -type entry() :: term().
 
--type open_ret() :: {ok, name()}
-                  | {repaired, name(), {recovered, integer()}, {badbytes, integer()}}
-                  | {error, term()}
-                  | {[{Node::atom(), open_ret()}], [{BadNode::atom(), {error, term()}}]}.
-
--spec open(name()) -> open_ret().
+-spec open(name()) -> disk_log:open_ret().
 open(Name) ->
     Config = qrpc_conf:get([dlog_config, Name], []),
     Dir = qrpc_conf:get(dlog_dir, "/opt/qrpc/var/log/dlog"),
-    filelib:ensure_dir(Dir),
+    filelib:ensure_path(Dir),
     File = filename:join(Dir, atom_to_list(Name)),
-    disk_log:open([{name, Name}, {file, File}|Config]).
+    disk_log:open([{name, {?MODULE, Name}}, {file, File}|Config]).
 
 -spec log(name(), entry()) -> ok.
 log(Name, Entry) ->
-    Res = case disk_log:log(Name, Entry) of
+    Res = case disk_log:log({?MODULE, Name}, Entry) of
         {error, no_such_log} ->
-            open(Name),
-            disk_log:log(Name, Entry);
+            case open(Name) of
+                {ok, _} ->
+                    ok;
+                OpenFailed ->
+                    logger:warning("dlog open for ~p failed with reason ~p", [Name, OpenFailed])
+            end,
+            disk_log:log({?MODULE, Name}, Entry);
         Other ->
             Other
     end,

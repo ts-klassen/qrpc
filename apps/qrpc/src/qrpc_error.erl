@@ -158,6 +158,20 @@ error(Metadata=?METADATA, Payload=?PAYLOAD) ->
         metadata => Metadata
       , payload => Payload
     }),
+    qrpc_clog:alog(?MODULE, <<
+        (klsn_time:unix_nanoseconds_to_rfc3339(maps:get(unix_nanoseconds, Metadata)))/binary
+      , ","
+      , (maps:get(uuid, Metadata))/binary
+      , ","
+      , (id_to_binstr(maps:get(id, Payload)))/binary
+      , ","
+      , (klsn_binstr:from_any(maps:get(module, Metadata)))/binary
+      , ":"
+      , (klsn_binstr:from_any(maps:get(function_name, Metadata)))/binary
+      , "/"
+      , (klsn_binstr:from_any(maps:get(function_arity, Metadata)))/binary
+      , "\n"
+    >>),
     Reason = #{
         qrpc_map_calls => #{ module => ?MODULE, type => error, pos => head }
       , metadata => Metadata
@@ -214,3 +228,8 @@ get(QrpcError=?ERROR_TYPE, Path, Default) ->
 lookup(QrpcError=?ERROR_TYPE, Path) ->
     klsn_map:lookup(Path, QrpcError).
 
+-spec id_to_binstr([atom(), ...]) -> klsn:binstr().
+id_to_binstr([H|T]) ->
+    lists:foldl(fun(Elem, Acc) ->
+        <<Acc/binary, ".", (klsn_binstr:from_any(Elem))/binary>>
+    end, klsn_binstr:from_any(H), T).
