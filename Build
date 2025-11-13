@@ -31,8 +31,15 @@ case "$1" in
     if sudo mountpoint -q _root/opt/qrpc; then
       sudo umount _root/opt/qrpc || sudo umount -l _root/opt/qrpc || true
     fi
+    if sudo mountpoint -q _root/proc; then
+      sudo umount _root/proc || sudo umount -l _root/proc || true
+    fi
     ;;
   mount)
+    sudo mkdir -p _root/proc
+    if ! sudo mountpoint -q _root/proc; then
+      sudo mount -t proc proc _root/proc
+    fi
     if ! sudo mountpoint -q _root/opt/qrpc; then
       sudo mkdir -p /opt/qrpc
       sudo mkdir -p _root/opt/qrpc

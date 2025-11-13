@@ -1,4 +1,4 @@
-@@ -377,7 +377,7 @@
+@@ -377,7 +377,7 @@ PREFER_NATIVE_PTHREADS?=	yes
  #
  # Keywords: work tmp
  
@@ -7,7 +7,7 @@
  #	This is the base directory where all packages will be installed.
  #
  #	Possible values: Any absolute path that does not contain special
-@@ -391,7 +391,7 @@
+@@ -391,7 +391,7 @@ CROSSBASE?=	${LOCALBASE}/cross
  # Possible: any path
  # Default: ${LOCALBASE}/cross
  
@@ -16,7 +16,7 @@
  # Where files containing local state information are installed
  # Possible: any path
  # Default: /var
-@@ -515,7 +515,7 @@
+@@ -515,7 +515,7 @@ PKG_RESUME_TRANSFERS?=	NO
  # Possible: yes or no.
  # Default: no.
  
@@ -25,3 +25,12 @@
  # This is the config directory under which system configuration files are
  # expected.
  # Possible: any path you like
+@@ -1349,7 +1349,7 @@ LEAFNODE_GROUP?=	news
+ # Possible: c rust
+ # Default: rust on operating systems supported by lang/rust
+ 
+-#RUST_TYPE?=	src
++RUST_TYPE?=	bin
+ # Used by dependencies of lang/rust to decide if the rust compiler
+ # should be installed directly from a binary or bootstraped from
+ # a binary.
