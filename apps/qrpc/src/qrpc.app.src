@@ -4,10 +4,11 @@
   {registered, []},
   {mod, {qrpc_app, []}},
   {applications,
-   [kernel,
-    klsn,
-    cowboy,
-    stdlib
+   [ kernel
+   , stdlib
+   , klsn
+   , cowboy
+   , erlcloud
    ]},
   {env,[]},
   {modules, []},

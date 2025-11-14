@@ -1,4 +1,6 @@
-[{<<"cowboy">>,
+{"1.2.0",
+[{<<"base16">>,{pkg,<<"base16">>,<<"2.0.1">>},1},
+ {<<"cowboy">>,
   {git,"https://github.com/ninenines/cowboy.git",
        {ref,"495e74ada88d0876d7e438d53f11af767a9cdcc4"}},
   0},
@@ -6,15 +8,34 @@
   {git,"https://github.com/ninenines/cowlib",
        {ref,"aca0ad953417b29bab2c41eeb4c37c98606c848b"}},
   1},
+ {<<"eini">>,{pkg,<<"eini">>,<<"1.2.9">>},1},
+ {<<"erlcloud">>,
+  {git,"https://github.com/erlcloud/erlcloud.git",
+       {ref,"7322624227e12120d88c47a72a2ba0a032ace9f3"}},
+  0},
  {<<"jsone">>,
   {git,"https://github.com/sile/jsone.git",
        {ref,"331b4a7b66cc9dc7c16ac067cf8a8297e0e669d8"}},
   1},
+ {<<"jsx">>,{pkg,<<"jsx">>,<<"2.11.0">>},1},
  {<<"klsn">>,
   {git,"https://github.com/ts-klassen/klsn.git",
        {ref,"be0aad53b293305ea8105243044943ccf760f72e"}},
   0},
+ {<<"lhttpc">>,{pkg,<<"lhttpc">>,<<"1.7.1">>},1},
  {<<"ranch">>,
   {git,"https://github.com/ninenines/ranch",
        {ref,"10b51304b26062e0dbfd5e74824324e9a911e269"}},
-  1}].
+  1}]}.
+[
+{pkg_hash,[
+ {<<"base16">>, <<"F0549F732E03BE8124ED0D19FD5EE52146CC8BE24C48CBC3F23AB44B157F11A2">>},
+ {<<"eini">>, <<"FCC3CBD49BBDD9A1D9735C7365DAFFCD84481CCE81E6CB80537883AA44AC4895">>},
+ {<<"jsx">>, <<"08154624050333919B4AC1B789667D5F4DB166DC50E190C4D778D1587F102EE0">>},
+ {<<"lhttpc">>, <<"8522AF9877765C33318A3AE486BE69BC165E835D05C3334A8166FD7B318D446B">>}]},
+{pkg_hash_ext,[
+ {<<"base16">>, <<"06EA2D48343282E712160BA89F692B471DB8B36ABE8394F3445FF9032251D772">>},
+ {<<"eini">>, <<"DA64AE8DB7C2F502E6F20CDF44CD3D9BE364412B87FF49FEBF282540F673DFCB">>},
+ {<<"jsx">>, <<"EED26A0D04D217F9EECEFFFB89714452556CF90EB38F290A27A4D45B9988F8C0">>},
+ {<<"lhttpc">>, <<"154EEB27692482B52BE86406DCD1D18A2405CAFCE0E8DAA4A1A7BFA7FE295896">>}]}
+].
