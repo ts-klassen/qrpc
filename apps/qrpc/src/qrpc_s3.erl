@@ -7,16 +7,31 @@
         create_bucket/4
       , list_buckets/2
       , make_presigned_url/3
+      , get_bucket_attribute/4
     ]).
 
 -export_type([
-        config/0
-      , access_key/0
+        access_key/0
+      , config/0
       , bucket/0
       , key/0
       , ttl/0
       , http_method/0
+      , s3_owner/0
+      , s3_bucket_info/0
+      , list_buckets_result/0
+      , create_bucket_opts/0
+      , presigned_url/0
       , make_presigned_url_opts/0
+      , s3_acl_grantee/0
+      , s3_acl_grant/0
+      , s3_acl_attribute/0
+      , s3_logging_attribute/0
+      , s3_notification_filter/0
+      , s3_notification_config/0
+      , s3_notification_attribute/0
+      , s3_bucket_attribute_name/0
+      , s3_bucket_attribute/0
     ]).
 
 -type access_key() :: #{
@@ -46,6 +61,56 @@
       , display_name => klsn:binstr()
       , uri => klsn:binstr()
     }.
+
+-type s3_acl_grantee() :: #{
+        type := klsn:binstr()
+      , id => klsn:binstr()
+      , display_name => klsn:binstr()
+      , uri => klsn:binstr()
+    }.
+
+-type s3_acl_grant() :: #{
+        grantee := s3_acl_grantee()
+      , permission := atom()
+    }.
+
+-type s3_acl_attribute() :: #{
+        owner := s3_owner()
+      , access_control_list := [s3_acl_grant()]
+    }.
+
+-type s3_logging_attribute() :: #{
+        enabled := boolean()
+      , target_bucket => klsn:binstr()
+      , target_prefix => klsn:binstr()
+      , target_grants => [s3_acl_grant()]
+    }.
+
+-type s3_notification_filter() :: #{
+        name := atom()
+      , value := klsn:binstr()
+    }.
+
+-type s3_notification_config() :: #{
+        type := topic_configuration
+              | queue_configuration
+              | cloud_function_configuration
+      , arn := klsn:binstr()
+      , id => klsn:binstr()
+      , events := [klsn:binstr()]
+      , filter := [s3_notification_filter()]
+    }.
+
+-type s3_notification_attribute() :: [s3_notification_config()].
+-type s3_bucket_attribute_name() :: erlcloud_s3:s3_bucket_attribute_name().
+
+-type s3_bucket_attribute() ::
+        s3_acl_attribute()
+      | klsn:binstr()                      % location
+      | s3_logging_attribute()             % logging
+      | enabled | disabled | suspended     % mfa_delete, versioning
+      | requester | bucket_owner           % request_payment
+      | s3_notification_attribute().       % notification (normalized configs)
 
 -type s3_bucket_info() :: #{
         name := klsn:binstr()
@@ -99,6 +164,56 @@ create_bucket(Bucket, Opts, AKey, Conf) ->
               , class => Class
               , reason => Reason
               , stacktrace => Stack
+              , version => 1
+            })
+    end.
+
+-spec get_bucket_attribute(
+        bucket(), s3_bucket_attribute_name(), access_key(), config()
+    ) -> s3_bucket_attribute().
+get_bucket_attribute(Bucket, AttributeName, AKey, Conf) ->
+    AWS = aws_config(AKey, Conf),
+    BucketStr = binary_to_list(Bucket),
+    Raw = try erlcloud_s3:get_bucket_attribute(BucketStr, AttributeName, AWS) catch
+        Class:Reason:Stack ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, s3, get_bucket_attribute, failed]
+              , fault_source => external
+              , message => <<"Getting S3 bucket attribute failed">>
+              , message_ja => <<"S3 バケット属性の取得に失敗しました"/utf8>>
+              , detail => #{
+                    bucket => Bucket
+                  , attribute_name => AttributeName
+                  , config => Conf
+                }
+              , is_known => false
+              , is_retryable => false
+              , class => Class
+              , reason => Reason
+              , stacktrace => Stack
+              , version => 1
+            })
+    end,
+    try
+        normalize_bucket_attribute(AttributeName, Raw)
+    catch
+        Class1:Reason1:Stack1 ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, s3, get_bucket_attribute, invalid_response]
+              , fault_source => external
+              , message => <<"Received invalid response from external api">>
+              , message_ja => <<"外部 API から不正な応答がありました"/utf8>>
+              , detail => #{
+                    bucket => Bucket
+                  , attribute_name => AttributeName
+                  , config => Conf
+                  , erlcloud_result => Raw
+                }
+              , is_known => false
+              , is_retryable => false
+              , class => Class1
+              , reason => Reason1
+              , stacktrace => Stack1
               , version => 1
             })
     end.
@@ -340,3 +455,113 @@ owner_field(Key, OwnerPL) ->
         Value ->
             {value, klsn_binstr:from_any(Value)}
     end.
+
+normalize_bucket_attribute(acl, Raw) ->
+    OwnerPL = proplists:get_value(owner, Raw, []),
+    Owner = klsn_map:filter(#{
+        id => owner_field(id, OwnerPL),
+        display_name => owner_field(display_name, OwnerPL),
+        uri => owner_field(uri, OwnerPL)
+    }),
+    GrantsPL = proplists:get_value(access_control_list, Raw, []),
+    Grants = lists:map(fun normalize_acl_grant/1, GrantsPL),
+    #{
+        owner => Owner,
+        access_control_list => Grants
+    };
+normalize_bucket_attribute(location, Raw) ->
+    klsn_binstr:from_any(Raw);
+normalize_bucket_attribute(logging, {enabled, false}) ->
+    #{enabled => false};
+normalize_bucket_attribute(logging, Raw) when is_list(Raw) ->
+    %% NOTE: erlcloud_s3:get_bucket_attribute/3 currently returns logging grants
+    %% under the misspelled key 'target_trants'. We treat that as an upstream
+    %% typo and normalize it here to the correctly named 'target_grants'.
+    %% Raw is [{enabled,true}, {target_bucket,...}, {target_prefix,...}, {target_trants, GrantsPL}]
+    Enabled = proplists:get_value(enabled, Raw, false),
+    TargetBucket = proplists:get_value(target_bucket, Raw, undefined),
+    TargetPrefix = proplists:get_value(target_prefix, Raw, undefined),
+    TargetTrantsPL = proplists:get_value(target_trants, Raw, []),
+    TargetTrants = lists:map(fun normalize_acl_grant/1, TargetTrantsPL),
+    klsn_map:filter(#{
+        enabled => {value, Enabled},
+        target_bucket => maybe_bin(TargetBucket),
+        target_prefix => maybe_bin(TargetPrefix),
+        target_grants => {value, TargetTrants}
+    });
+normalize_bucket_attribute(mfa_delete, Raw) ->
+    Raw;
+normalize_bucket_attribute(request_payment, Raw) ->
+    Raw;
+normalize_bucket_attribute(versioning, Raw) ->
+    Raw;
+normalize_bucket_attribute(notification, Raw) when is_list(Raw) ->
+    %% erlcloud returns notification attributes as a list of single-element
+    %% lists, each containing a {ConfType, ConfigPL} pair. ConfigPL itself
+    %% is a proplist describing the configuration rather than a list of
+    %% configuration proplists.
+    lists:map(
+        fun ([{ConfType, ConfigPL}]) ->
+                normalize_notification_config(ConfType, ConfigPL)
+        end,
+        Raw
+    ).
+
+normalize_acl_grant(GrantPL) ->
+    GranteePL = proplists:get_value(grantee, GrantPL, []),
+    Permission = proplists:get_value(permission, GrantPL),
+    Grantee = klsn_map:filter(#{
+        type => maybe_bin(proplists:get_value(type, GranteePL, undefined)),
+        id => maybe_bin(proplists:get_value(id, GranteePL, undefined)),
+        display_name => maybe_bin(proplists:get_value(display_name, GranteePL, undefined)),
+        uri => maybe_bin(proplists:get_value(uri, GranteePL, undefined))
+    }),
+    #{
+        grantee => Grantee,
+        permission => Permission
+    }.
+
+normalize_notification_config(ConfType, ConfPL) ->
+    Arn = case ConfType of
+        topic_configuration -> proplists:get_value(topic, ConfPL);
+        queue_configuration -> proplists:get_value(queue, ConfPL);
+        cloud_function_configuration -> proplists:get_value(cloud_function, ConfPL)
+    end,
+    Id = proplists:get_value(id, ConfPL, undefined),
+    %% erlcloud encodes notification events as a single `{event, [StringEvents]}`
+    %% entry (see `?S3_BUCKET_EVENTS_LIST` in erlcloud). `get_all_values/2`
+    %% would therefore yield a list whose only element is the entire list of
+    %% string events, which in turn would be collapsed into a single binary.
+    %% Instead, fetch the inner list and map over it so each event is preserved.
+    Events = lists:map(
+        fun klsn_binstr:from_any/1,
+        proplists:get_value(event, ConfPL, [])
+    ),
+    Filter0 = proplists:get_value(filter, ConfPL, []),
+    Filter =
+        case Filter0 of
+            {filter, List} ->
+                lists:map(
+                    fun({Name, Value}) ->
+                        #{
+                            name => Name,
+                            value => klsn_binstr:from_any(Value)
+                        }
+                    end,
+                    List
+                );
+            _ ->
+                []
+        end,
+    klsn_map:filter(#{
+        type => {value, ConfType},
+        arn => maybe_bin(Arn),
+        id => maybe_bin(Id),
+        events => {value, Events},
+        filter => {value, Filter}
+    }).
+
+maybe_bin(undefined) ->
+    none;
+maybe_bin(V) ->
+    {value, klsn_binstr:from_any(V)}.
