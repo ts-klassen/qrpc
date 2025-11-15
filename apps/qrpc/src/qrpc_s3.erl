@@ -17,21 +17,21 @@
       , key/0
       , ttl/0
       , http_method/0
-      , s3_owner/0
-      , s3_bucket_info/0
+      , owner/0
+      , bucket_info/0
       , list_buckets_result/0
       , create_bucket_opts/0
       , presigned_url/0
       , make_presigned_url_opts/0
-      , s3_acl_grantee/0
-      , s3_acl_grant/0
-      , s3_acl_attribute/0
-      , s3_logging_attribute/0
-      , s3_notification_filter/0
-      , s3_notification_config/0
-      , s3_notification_attribute/0
-      , s3_bucket_attribute_name/0
-      , s3_bucket_attribute/0
+      , acl_grantee/0
+      , acl_grant/0
+      , acl_attribute/0
+      , logging_attribute/0
+      , notification_filter/0
+      , notification_config/0
+      , notification_attribute/0
+      , bucket_attribute_name/0
+      , bucket_attribute/0
     ]).
 
 -type access_key() :: #{
@@ -56,70 +56,70 @@
 %% HTTP method allowed in presigning
 -type http_method() :: get | put | head | delete.
 
--type s3_owner() :: #{
+-type owner() :: #{
         id => klsn:binstr()
       , display_name => klsn:binstr()
       , uri => klsn:binstr()
     }.
 
--type s3_acl_grantee() :: #{
+-type acl_grantee() :: #{
         type := klsn:binstr()
       , id => klsn:binstr()
       , display_name => klsn:binstr()
       , uri => klsn:binstr()
     }.
 
--type s3_acl_grant() :: #{
-        grantee := s3_acl_grantee()
+-type acl_grant() :: #{
+        grantee := acl_grantee()
       , permission := atom()
     }.
 
--type s3_acl_attribute() :: #{
-        owner := s3_owner()
-      , access_control_list := [s3_acl_grant()]
+-type acl_attribute() :: #{
+        owner := owner()
+      , access_control_list := [acl_grant()]
     }.
 
--type s3_logging_attribute() :: #{
+-type logging_attribute() :: #{
         enabled := boolean()
       , target_bucket => klsn:binstr()
       , target_prefix => klsn:binstr()
-      , target_grants => [s3_acl_grant()]
+      , target_grants => [acl_grant()]
     }.
 
--type s3_notification_filter() :: #{
+-type notification_filter() :: #{
         name := atom()
       , value := klsn:binstr()
     }.
 
--type s3_notification_config() :: #{
+-type notification_config() :: #{
         type := topic_configuration
               | queue_configuration
               | cloud_function_configuration
       , arn := klsn:binstr()
       , id => klsn:binstr()
       , events := [klsn:binstr()]
-      , filter := [s3_notification_filter()]
+      , filter := [notification_filter()]
     }.
 
--type s3_notification_attribute() :: [s3_notification_config()].
--type s3_bucket_attribute_name() :: erlcloud_s3:s3_bucket_attribute_name().
+-type notification_attribute() :: [notification_config()].
+-type bucket_attribute_name() :: erlcloud_s3:s3_bucket_attribute_name().
 
--type s3_bucket_attribute() ::
-        s3_acl_attribute()
+-type bucket_attribute() ::
+        acl_attribute()
       | klsn:binstr()                      % location
-      | s3_logging_attribute()             % logging
+      | logging_attribute()                % logging
       | enabled | disabled | suspended     % mfa_delete, versioning
       | requester | bucket_owner           % request_payment
-      | s3_notification_attribute().       % notification (normalized configs)
+      | notification_attribute().          % notification (normalized configs)
 
--type s3_bucket_info() :: #{
+-type bucket_info() :: #{
         name := klsn:binstr()
       , creation_date := calendar:datetime()
     }.
 
 -type list_buckets_result() :: #{
-        owner := s3_owner()
-      , buckets := [s3_bucket_info()]
+        owner := owner()
+      , buckets := [bucket_info()]
     }.
 
 -type create_bucket_opts() :: #{
@@ -169,8 +169,8 @@ create_bucket(Bucket, Opts, AKey, Conf) ->
     end.
 
 -spec get_bucket_attribute(
-        bucket(), s3_bucket_attribute_name(), access_key(), config()
-    ) -> s3_bucket_attribute().
+        bucket(), bucket_attribute_name(), access_key(), config()
+    ) -> bucket_attribute().
 get_bucket_attribute(Bucket, AttributeName, AKey, Conf) ->
     AWS = aws_config(AKey, Conf),
     BucketStr = binary_to_list(Bucket),
