@@ -8,6 +8,7 @@
       , list_buckets/2
       , make_presigned_url/3
       , get_bucket_attribute/4
+      , set_bucket_attribute/5
     ]).
 
 -export_type([
@@ -30,8 +31,10 @@
       , notification_filter/0
       , notification_config/0
       , notification_attribute/0
-      , bucket_attribute_name/0
-      , bucket_attribute/0
+      , bucket_attribute_name_get/0
+      , bucket_attribute_name_set/0
+      , bucket_attribute_get/0
+      , bucket_attribute_set/0
     ]).
 
 -type access_key() :: #{
@@ -102,13 +105,44 @@
     }.
 
 -type notification_attribute() :: [notification_config()].
--type bucket_attribute_name() :: erlcloud_s3:s3_bucket_attribute_name().
+-type bucket_attribute_name_get() :: erlcloud_s3:s3_bucket_attribute_name().
+-type bucket_attribute_name_set() ::
+        acl
+      | logging
+      | mfa_delete
+      | request_payment
+      | versioning
+      | notification.
 
--type bucket_attribute() ::
+-type mfa_delete_attribute_get() :: enabled | disabled.
+-type versioning_attribute_get() :: enabled | disabled | suspended.
+
+-type mfa_delete_attribute_set() ::
+        #{
+           status := enabled | suspended,
+           mfa_delete => enabled | disabled
+         }.
+
+-type versioning_attribute_set() ::
+        #{
+           status := enabled | suspended,
+           mfa_delete => enabled | disabled
+         }.
+
+-type bucket_attribute_get() ::
         acl_attribute()
       | klsn:binstr()                      % location
       | logging_attribute()                % logging
-      | enabled | disabled | suspended     % mfa_delete, versioning
+      | mfa_delete_attribute_get()         % mfa_delete
+      | versioning_attribute_get()         % versioning
+      | requester | bucket_owner           % request_payment
+      | notification_attribute().          % notification (normalized configs)
+
+-type bucket_attribute_set() ::
+        acl_attribute()
+      | logging_attribute()                % logging
+      | mfa_delete_attribute_set()         % mfa_delete
+      | versioning_attribute_set()         % versioning
       | requester | bucket_owner           % request_payment
       | notification_attribute().          % notification (normalized configs)
 
@@ -169,8 +203,8 @@ create_bucket(Bucket, Opts, AKey, Conf) ->
     end.
 
 -spec get_bucket_attribute(
-        bucket(), bucket_attribute_name(), access_key(), config()
-    ) -> bucket_attribute().
+        bucket(), bucket_attribute_name_get(), access_key(), config()
+    ) -> bucket_attribute_get().
 get_bucket_attribute(Bucket, AttributeName, AKey, Conf) ->
     AWS = aws_config(AKey, Conf),
     BucketStr = binary_to_list(Bucket),
@@ -214,6 +248,35 @@ get_bucket_attribute(Bucket, AttributeName, AKey, Conf) ->
               , class => Class1
               , reason => Reason1
               , stacktrace => Stack1
+              , version => 1
+            })
+    end.
+
+-spec set_bucket_attribute(
+        bucket(), bucket_attribute_name_set(), bucket_attribute_set(), access_key(), config()
+    ) -> ok.
+set_bucket_attribute(Bucket, AttributeName, Attribute, AKey, Conf) ->
+    AWS = aws_config(AKey, Conf),
+    BucketStr = binary_to_list(Bucket),
+    RawAttribute = denormalize_bucket_attribute(AttributeName, Attribute),
+    try erlcloud_s3:set_bucket_attribute(BucketStr, AttributeName, RawAttribute, AWS) catch
+        Class:Reason:Stack ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, s3, set_bucket_attribute, failed]
+              , fault_source => external
+              , message => <<"Setting S3 bucket attribute failed">>
+              , message_ja => <<"S3 バケット属性の設定に失敗しました"/utf8>>
+              , detail => #{
+                    bucket => Bucket
+                  , attribute_name => AttributeName
+                  , attribute => Attribute
+                  , config => Conf
+                }
+              , is_known => false
+              , is_retryable => false
+              , class => Class
+              , reason => Reason
+              , stacktrace => Stack
               , version => 1
             })
     end.
@@ -565,3 +628,109 @@ maybe_bin(undefined) ->
     none;
 maybe_bin(V) ->
     {value, klsn_binstr:from_any(V)}.
+
+denormalize_bucket_attribute(acl, Attr) ->
+    Owner = maps:get(owner, Attr, #{}),
+    Grants = maps:get(access_control_list, Attr, []),
+    OwnerPL = bin_map_to_str_proplist(Owner),
+    GrantsPL = lists:map(fun denormalize_acl_grant/1, Grants),
+    [
+        {owner, OwnerPL},
+        {access_control_list, GrantsPL}
+    ];
+denormalize_bucket_attribute(logging, Attr) ->
+    Enabled = maps:get(enabled, Attr, false),
+    case Enabled of
+        false ->
+            [{enabled, false}];
+        true ->
+            TargetGrants = maps:get(target_grants, Attr, []),
+            TargetGrantsPL = lists:map(fun denormalize_acl_grant/1, TargetGrants),
+            PLMap = klsn_map:filter(#{
+                enabled => {value, true},
+                target_bucket => klsn_map:lookup([target_bucket], Attr),
+                target_prefix => klsn_map:lookup([target_prefix], Attr),
+                target_grants => {value, TargetGrantsPL}
+            }),
+            bin_map_to_str_proplist(PLMap)
+    end;
+denormalize_bucket_attribute(mfa_delete, Attr) when is_map(Attr) ->
+    PLMap = klsn_map:filter(#{
+        status => {value, klsn_map:get([status], Attr)},
+        mfa_delete => klsn_map:lookup([mfa_delete], Attr)
+    }),
+    bin_map_to_str_proplist(PLMap);
+denormalize_bucket_attribute(mfa_delete, Attr) ->
+    Attr;
+denormalize_bucket_attribute(request_payment, Attr) ->
+    Attr;
+denormalize_bucket_attribute(versioning, Attr) when is_map(Attr) ->
+    PLMap = klsn_map:filter(#{
+        status => {value, klsn_map:get([status], Attr)},
+        mfa_delete => klsn_map:lookup([mfa_delete], Attr)
+    }),
+    bin_map_to_str_proplist(PLMap);
+denormalize_bucket_attribute(versioning, Attr) ->
+    Attr;
+denormalize_bucket_attribute(notification, Attr) when is_list(Attr) ->
+    lists:map(fun denormalize_notification_config/1, Attr).
+
+denormalize_acl_grant(Grant) ->
+    Grantee = maps:get(grantee, Grant, #{}),
+    Permission = maps:get(permission, Grant),
+    GranteePL = bin_map_to_str_proplist(Grantee),
+    [
+        {grantee, GranteePL},
+        {permission, Permission}
+    ].
+
+denormalize_notification_config(Conf) ->
+    ConfType = maps:get(type, Conf),
+    Arn = maps:get(arn, Conf),
+    ArnStr = binary_to_list(Arn),
+    Events = maps:get(events, Conf, []),
+    Filter0 = maps:get(filter, Conf, []),
+    Filter =
+        case Filter0 of
+            [] ->
+                none;
+            List when is_list(List) ->
+                FilterList =
+                    lists:map(
+                      fun(F) ->
+                          {maps:get(name, F),
+                           binary_to_list(maps:get(value, F))}
+                      end,
+                      List
+                     ),
+                {value, FilterList}
+        end,
+    BaseMap = klsn_map:filter(#{
+        id => klsn_map:lookup([id], Conf),
+        event => {value, Events},
+        filter => Filter
+    }),
+    ConfPLBase = bin_map_to_str_proplist(BaseMap),
+    ConfPL =
+        case ConfType of
+            topic_configuration ->
+                [{topic, ArnStr} | ConfPLBase];
+            queue_configuration ->
+                [{queue, ArnStr} | ConfPLBase];
+            cloud_function_configuration ->
+                [{cloud_function, ArnStr} | ConfPLBase]
+        end,
+    [{ConfType, ConfPL}].
+
+bin_map_to_str_proplist(Map) when is_map(Map) ->
+    maps:to_list(maps:map(fun(_, Value) ->
+        bin_map_to_str_proplist(Value)
+    end, Map));
+bin_map_to_str_proplist(Binary) when is_binary(Binary) ->
+    binary_to_list(Binary);
+bin_map_to_str_proplist(List) when is_list(List) ->
+    lists:map(fun(Elem) ->
+        bin_map_to_str_proplist(Elem)
+    end, List);
+bin_map_to_str_proplist(Term) ->
+    Term.
