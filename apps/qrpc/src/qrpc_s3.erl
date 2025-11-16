@@ -39,6 +39,7 @@
       , list_buckets/2
       , make_presigned_url/3
       , get_bucket_lifecycle/3
+      , put_bucket_lifecycle/4
       , get_bucket_attribute/4
       , set_bucket_attribute/5
     ]).
@@ -391,6 +392,57 @@ get_bucket_lifecycle(Bucket, AKey, Conf) ->
             })
     end.
 
+-spec put_bucket_lifecycle(
+        bucket(), bucket_lifecycle(), access_key(), config()
+    ) -> ok.
+put_bucket_lifecycle(Bucket, Policy, AKey, Conf) ->
+    AWS = aws_config(AKey, Conf),
+    BucketStr = binary_to_list(Bucket),
+    PolicyPL = denormalize_bucket_lifecycle(Policy),
+    Raw = try erlcloud_s3:put_bucket_lifecycle(BucketStr, PolicyPL, AWS) catch
+        Class:Reason:Stack ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, s3, put_bucket_lifecycle, failed]
+              , fault_source => external
+              , message => <<"Setting S3 bucket lifecycle failed">>
+              , message_ja => <<"S3 バケットライフサイクル設定の更新に失敗しました"/utf8>>
+              , detail => #{
+                    bucket => Bucket
+                  , policy => Policy
+                  , config => Conf
+                }
+              , is_known => false
+              , is_retryable => false
+              , class => Class
+              , reason => Reason
+              , stacktrace => Stack
+              , version => 1
+            })
+    end,
+    case Raw of
+        ok ->
+            ok;
+        {error, Reason2} ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, s3, put_bucket_lifecycle, failed]
+              , fault_source => external
+              , message => <<"Setting S3 bucket lifecycle failed">>
+              , message_ja => <<"S3 バケットライフサイクル設定の更新に失敗しました"/utf8>>
+              , detail => #{
+                    bucket => Bucket
+                  , policy => Policy
+                  , config => Conf
+                  , erlcloud_result => Raw
+                }
+              , is_known => false
+              , is_retryable => false
+              , class => error
+              , reason => Reason2
+              , stacktrace => []
+              , version => 1
+            })
+    end.
+
 -spec set_bucket_attribute(
         bucket(), bucket_attribute_name_set(), bucket_attribute_set(), access_key(), config()
     ) -> ok.
@@ -712,6 +764,29 @@ normalize_noncurrent_version_expiration({value, NonCurrentExpPL}) ->
     {value, #{
         noncurrent_days => maps:get(noncurrent_days, NonCurrentExp)
     }}.
+
+denormalize_bucket_lifecycle(Policy) ->
+    lists:map(fun denormalize_lifecycle_rule/1, Policy).
+
+denormalize_lifecycle_rule(Rule) ->
+    Status = case maps:get(status, Rule, undefined) of
+        enabled -> <<"Enabled">>;
+        disabled -> <<"Disabled">>;
+        Other -> klsn_binstr:from_any(Other)
+    end,
+    RuleMap = klsn_map:filter(#{
+        id => s2b(klsn_map:lookup([id], Rule)),
+        prefix => s2b(klsn_map:lookup([prefix], Rule)),
+        status => {value, Status},
+        expiration => klsn_map:lookup([expiration], Rule),
+        noncurrent_version_expiration =>
+            klsn_map:lookup([noncurrent_version_expiration], Rule),
+        noncurrent_version_transition =>
+            klsn_map:lookup([noncurrent_version_transition], Rule),
+        transition =>
+            klsn_map:lookup([transition], Rule)
+    }),
+    bin_map_to_str_proplist(RuleMap).
 
 normalize_bucket_attribute(acl, Raw0) ->
     Raw = p2m(Raw0),
