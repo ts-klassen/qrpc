@@ -3,10 +3,42 @@
 -include_lib("qrpc/include/qrpc.hrl").
 -include_lib("erlcloud/include/erlcloud_aws.hrl").
 
+%% I HATE proplist(). Use map().
+%% I HATE record(). Use map().
+%% I HATE string(). Use klsn:binstr() aka binary().
+%% I HATE undefined. Omit the field in map.
+%% I HATE null. Use klsn:optnl(V) :: {value, V} | none.
+%%  NEVER maps:get(Key, Map, undefined) -> Value | undefined.
+%%    USE klsn_map:lookup([Key], Map) -> {value, Value} | none.
+%%    USE klsn_map:filter(#{Key => klsn_map:lookup([Key], Map)}).
+%%  AVOID #{ Field := klsn:optnl(Value) }
+%%    USE #{ Field => Value }
+%% I HATE {error, term()}. Use ?QRPC_ERROR(qrpc_error:partial_payload()).
+%% I HATE specs and type definitions with term(), any(), map(), list().
+%%
+%% Here are thy types and specs of what you will be using.
+%% I am using term() and map() because it REALY can by anything.
+%% Do NOT use term() nor map() in your case unless it REALY can be anything.
+%% In most cases, AI generated code with term() is instantly rejected.
+%%  -type klsn:optnl(Value) :: {value, Value} | none.
+%%  -type klsn_map:path() :: [term()].
+%%  -spec klsn_map:lookup(klsn_map:path(), map()) -> klsn:optnl(term()).
+%%  -spec filter(maps:map(Key, klsn:optnl(Value))) -> maps:map(Key, Value).
+%%
+%% Here is an example:
+%%  1> Map = #{field1 => value1},
+%%     MaybeField1 = klsn_map:lookup([field1], Map).
+%%  {value,value1}
+%%  2> MaybeField2 = klsn_map:lookup([field2], Map).
+%%  none
+%%  3> klsn_map:filter(#{new_field1 => MaybeField1, new_field2 => MaybeField2}).
+%%   #{new_field1 => value1}
+
 -export([
         create_bucket/4
       , list_buckets/2
       , make_presigned_url/3
+      , get_bucket_lifecycle/3
       , get_bucket_attribute/4
       , set_bucket_attribute/5
     ]).
@@ -35,6 +67,12 @@
       , bucket_attribute_name_set/0
       , bucket_attribute_get/0
       , bucket_attribute_set/0
+      , bucket_lifecycle/0
+      , lifecycle_rule/0
+      , lifecycle_expiration/0
+      , lifecycle_transition/0
+      , lifecycle_noncurrent_version_transition/0
+      , lifecycle_noncurrent_version_expiration/0
     ]).
 
 -type access_key() :: #{
@@ -156,6 +194,38 @@
       , buckets := [bucket_info()]
     }.
 
+-type lifecycle_expiration() :: #{
+        date => klsn:binstr(),
+        days => non_neg_integer()
+    }.
+
+-type lifecycle_transition() :: #{
+        date => klsn:binstr(),
+        days => non_neg_integer(),
+        storage_class := klsn:binstr()
+    }.
+
+-type lifecycle_noncurrent_version_transition() :: #{
+        noncurrent_days := non_neg_integer(),
+        storage_class   := klsn:binstr()
+    }.
+
+-type lifecycle_noncurrent_version_expiration() :: #{
+        noncurrent_days := non_neg_integer()
+    }.
+
+-type lifecycle_rule() :: #{
+        id => klsn:binstr(),
+        prefix := klsn:binstr(),
+        status := enabled | disabled,
+        expiration => lifecycle_expiration(),
+        noncurrent_version_expiration => lifecycle_noncurrent_version_expiration(),
+        noncurrent_version_transition => lifecycle_noncurrent_version_transition(),
+        transition => lifecycle_transition()
+    }.
+
+-type bucket_lifecycle() :: [lifecycle_rule()].
+
 -type create_bucket_opts() :: #{
         s3_bucket_acl => erlcloud_s3:s3_bucket_acl()
       , s3_location_constraint => erlcloud_s3:s3_location_constraint()
@@ -248,6 +318,75 @@ get_bucket_attribute(Bucket, AttributeName, AKey, Conf) ->
               , class => Class1
               , reason => Reason1
               , stacktrace => Stack1
+              , version => 1
+            })
+    end.
+
+-spec get_bucket_lifecycle(
+        bucket(), access_key(), config()
+    ) -> bucket_lifecycle().
+get_bucket_lifecycle(Bucket, AKey, Conf) ->
+    AWS = aws_config(AKey, Conf),
+    BucketStr = binary_to_list(Bucket),
+    Raw = try erlcloud_s3:get_bucket_lifecycle(BucketStr, AWS) catch
+        Class:Reason:Stack ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, s3, get_bucket_lifecycle, failed]
+              , fault_source => external
+              , message => <<"Getting S3 bucket lifecycle failed">>
+              , message_ja => <<"S3 バケットライフサイクル設定の取得に失敗しました"/utf8>>
+              , detail => #{
+                    bucket => Bucket
+                  , config => Conf
+                }
+              , is_known => false
+              , is_retryable => false
+              , class => Class
+              , reason => Reason
+              , stacktrace => Stack
+              , version => 1
+            })
+    end,
+    case Raw of
+        {ok, RulesPL} ->
+            try
+                normalize_bucket_lifecycle(RulesPL)
+            catch
+                Class1:Reason1:Stack1 ->
+                    ?QRPC_ERROR(#{
+                        id => [qrpc, s3, get_bucket_lifecycle, invalid_response]
+                      , fault_source => external
+                      , message => <<"Received invalid response from external api">>
+                      , message_ja => <<"外部 API から不正な応答がありました"/utf8>>
+                      , detail => #{
+                            bucket => Bucket
+                          , config => Conf
+                          , erlcloud_result => Raw
+                        }
+                      , is_known => false
+                      , is_retryable => false
+                      , class => Class1
+                      , reason => Reason1
+                      , stacktrace => Stack1
+                      , version => 1
+                    })
+            end;
+        {error, Reason2} ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, s3, get_bucket_lifecycle, failed]
+              , fault_source => external
+              , message => <<"Getting S3 bucket lifecycle failed">>
+              , message_ja => <<"S3 バケットライフサイクル設定の取得に失敗しました"/utf8>>
+              , detail => #{
+                    bucket => Bucket
+                  , config => Conf
+                  , erlcloud_result => Raw
+                }
+              , is_known => false
+              , is_retryable => false
+              , class => error
+              , reason => Reason2
+              , stacktrace => []
               , version => 1
             })
     end.
@@ -508,6 +647,71 @@ port_spec(#aws_config{s3_port = 80}) -> "";
 port_spec(#aws_config{s3_port = 443}) -> "";
 port_spec(#aws_config{s3_port = Port}) ->
     [":", erlang:integer_to_list(Port)].
+
+normalize_bucket_lifecycle(RulesPL) ->
+    lists:map(fun normalize_lifecycle_rule/1, RulesPL).
+
+normalize_lifecycle_rule(RulePL) ->
+    Rule = p2m(RulePL),
+    Exp0 = klsn_map:lookup([expiration], Rule),
+    NonCurrentExp0 = klsn_map:lookup([noncurrent_version_expiration], Rule),
+    NonCurrentTrans0 = klsn_map:lookup([noncurrent_version_transition], Rule),
+    Trans0 = klsn_map:lookup([transition], Rule),
+    StatusBin = s2b(maps:get(status, Rule)),
+    Status = case StatusBin of
+        <<"Enabled">> -> enabled;
+        <<"Disabled">> -> disabled;
+        <<"ENABLED">> -> enabled;
+        <<"DISABLED">> -> disabled;
+        _ -> disabled
+    end,
+    klsn_map:filter(#{
+        id => s2b(klsn_map:lookup([id], Rule)),
+        prefix => {value, s2b(maps:get(prefix, Rule))},
+        status => {value, Status},
+        expiration => normalize_lifecycle_expiration(Exp0),
+        noncurrent_version_expiration =>
+            normalize_noncurrent_version_expiration(NonCurrentExp0),
+        noncurrent_version_transition =>
+            normalize_noncurrent_version_transition(NonCurrentTrans0),
+        transition => normalize_lifecycle_transition(Trans0)
+    }).
+
+normalize_lifecycle_expiration(none) ->
+    none;
+normalize_lifecycle_expiration({value, ExpirationPL}) ->
+    Expiration = p2m(ExpirationPL),
+    {value, klsn_map:filter(#{
+        date => s2b(klsn_map:lookup([date], Expiration)),
+        days => klsn_map:lookup([days], Expiration)
+    })}.
+
+normalize_lifecycle_transition(none) ->
+    none;
+normalize_lifecycle_transition({value, TransitionPL}) ->
+    Transition = p2m(TransitionPL),
+    {value, klsn_map:filter(#{
+        date => s2b(klsn_map:lookup([date], Transition)),
+        days => klsn_map:lookup([days], Transition),
+        storage_class => {value, s2b(maps:get(storage_class, Transition))}
+    })}.
+
+normalize_noncurrent_version_transition(none) ->
+    none;
+normalize_noncurrent_version_transition({value, NonCurrentTransPL}) ->
+    NonCurrentTrans = p2m(NonCurrentTransPL),
+    {value, #{
+        noncurrent_days => maps:get(noncurrent_days, NonCurrentTrans),
+        storage_class => s2b(maps:get(storage_class, NonCurrentTrans))
+    }}.
+
+normalize_noncurrent_version_expiration(none) ->
+    none;
+normalize_noncurrent_version_expiration({value, NonCurrentExpPL}) ->
+    NonCurrentExp = p2m(NonCurrentExpPL),
+    {value, #{
+        noncurrent_days => maps:get(noncurrent_days, NonCurrentExp)
+    }}.
 
 normalize_bucket_attribute(acl, Raw0) ->
     Raw = p2m(Raw0),
