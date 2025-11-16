@@ -37,6 +37,7 @@
 -export([
         create_bucket/4
       , list_buckets/2
+      , list_objects/4
       , make_presigned_url/3
       , get_bucket_lifecycle/3
       , put_bucket_lifecycle/4
@@ -55,6 +56,10 @@
       , owner/0
       , bucket_info/0
       , list_buckets_result/0
+      , list_objects_opts/0
+      , object_content/0
+      , common_prefix/0
+      , list_objects_result/0
       , create_bucket_opts/0
       , presigned_url/0
       , make_presigned_url_opts/0
@@ -194,6 +199,39 @@
 -type list_buckets_result() :: #{
         owner := owner()
       , buckets := [bucket_info()]
+    }.
+
+-type object_content() :: #{
+        key := klsn:binstr(),
+        last_modified := calendar:datetime(),
+        etag := klsn:binstr(),
+        size := non_neg_integer(),
+        storage_class := klsn:binstr(),
+        owner => owner()
+    }.
+
+-type common_prefix() :: #{
+        prefix := klsn:binstr()
+    }.
+
+-type list_objects_result() :: #{
+        name := klsn:binstr(),
+        prefix => klsn:binstr(),
+        marker => klsn:binstr(),
+        next_marker => klsn:binstr(),
+        delimiter => klsn:binstr(),
+        max_keys := non_neg_integer(),
+        is_truncated := boolean(),
+        common_prefixes := [common_prefix()],
+        contents := [object_content()]
+    }.
+
+-type list_objects_opts() :: #{
+        delimiter => klsn:binstr(),
+        marker => klsn:binstr(),
+        max_keys => non_neg_integer(),
+        encoding_type => klsn:binstr(),
+        prefix => klsn:binstr()
     }.
 
 -type lifecycle_expiration() :: #{
@@ -583,6 +621,57 @@ list_buckets(AKey, Conf) ->
             })
     end.
 
+-spec list_objects(
+        bucket(), list_objects_opts(), access_key(), config()
+    ) -> list_objects_result().
+list_objects(Bucket, Opts, AKey, Conf) ->
+    AWS = aws_config(AKey, Conf),
+    BucketStr = binary_to_list(Bucket),
+    OptsPL = denormalize_list_objects_opts(Opts),
+    Result0 = try erlcloud_s3:list_objects(BucketStr, OptsPL, AWS) catch
+        Class:Reason:Stack ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, s3, list_objects, failed]
+              , fault_source => external
+              , message => <<"Listing S3 objects failed">>
+              , message_ja => <<"S3 オブジェクトの一覧取得に失敗しました"/utf8>>
+              , detail => #{
+                    bucket => Bucket
+                  , opts => Opts
+                  , config => Conf
+                }
+              , is_known => false
+              , is_retryable => false
+              , class => Class
+              , reason => Reason
+              , stacktrace => Stack
+              , version => 1
+            })
+    end,
+    try
+        normalize_list_objects(Result0)
+    catch
+        Class1:Reason1:Stack1 ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, s3, list_objects, invalid_response]
+              , fault_source => external
+              , message => <<"Received invalid response from external api">>
+              , message_ja => <<"外部 API から不正な応答がありました"/utf8>>
+              , detail => #{
+                    bucket => Bucket
+                  , opts => Opts
+                  , config => Conf
+                  , erlcloud_result => Result0
+                }
+              , is_known => false
+              , is_retryable => false
+              , class => Class1
+              , reason => Reason1
+              , stacktrace => Stack1
+              , version => 1
+            })
+    end.
+
 -spec make_presigned_url(
         make_presigned_url_opts(), access_key(), config()
     ) -> presigned_url().
@@ -836,6 +925,78 @@ denormalize_lifecycle_rule(Rule) ->
             klsn_map:lookup([transition], Rule)
     }),
     bin_map_to_str_proplist(RuleMap).
+
+normalize_list_objects(ResultPL) ->
+    Result = p2m(ResultPL),
+    Name = s2b(klsn_map:lookup([name], Result)),
+    Prefix = s2b(klsn_map:lookup([prefix], Result)),
+    Marker = s2b(klsn_map:lookup([marker], Result)),
+    NextMarker = s2b(klsn_map:lookup([next_marker], Result)),
+    Delimiter = s2b(klsn_map:lookup([delimiter], Result)),
+    MaxKeys = maps:get(max_keys, Result, 0),
+    IsTruncated = maps:get(is_truncated, Result, false),
+    CommonPrefixes0 = maps:get(common_prefixes, Result, []),
+    CommonPrefixes = lists:map(
+        fun(PrefixPL) ->
+            PrefixMap = p2m(PrefixPL),
+            klsn_map:filter(#{
+                prefix => s2b(klsn_map:lookup([prefix], PrefixMap))
+            })
+        end,
+        CommonPrefixes0
+    ),
+    Contents0 = maps:get(contents, Result, []),
+    Contents = lists:map(fun normalize_object_content/1, Contents0),
+    HeadMap = klsn_map:filter(#{
+        name => Name,
+        prefix => Prefix,
+        marker => Marker,
+        next_marker => NextMarker,
+        delimiter => Delimiter
+    }),
+    maps:merge(HeadMap, #{
+        max_keys => MaxKeys,
+        is_truncated => IsTruncated,
+        common_prefixes => CommonPrefixes,
+        contents => Contents
+    }).
+
+normalize_object_content(ContentPL) ->
+    Content = p2m(ContentPL),
+    OwnerMaybe =
+        case maps:is_key(owner, Content) of
+            true ->
+                Owner0 = p2m(maps:get(owner, Content)),
+                Owner = klsn_map:filter(#{
+                    id => s2b(klsn_map:lookup([id], Owner0)),
+                    display_name => s2b(klsn_map:lookup([display_name], Owner0)),
+                    uri => s2b(klsn_map:lookup([uri], Owner0))
+                }),
+                case Owner of
+                    #{} -> none;
+                    _ -> {value, Owner}
+                end;
+            false ->
+                none
+        end,
+    klsn_map:filter(#{
+        key => {value, s2b(maps:get(key, Content))},
+        last_modified => {value, maps:get(last_modified, Content)},
+        etag => {value, s2b(maps:get(etag, Content))},
+        size => {value, maps:get(size, Content)},
+        storage_class => {value, s2b(maps:get(storage_class, Content))},
+        owner => OwnerMaybe
+    }).
+
+denormalize_list_objects_opts(Opts) ->
+    OptsMap = klsn_map:filter(#{
+        delimiter => s2b(klsn_map:lookup([delimiter], Opts)),
+        marker => s2b(klsn_map:lookup([marker], Opts)),
+        encoding_type => s2b(klsn_map:lookup([encoding_type], Opts)),
+        prefix => s2b(klsn_map:lookup([prefix], Opts)),
+        max_keys => klsn_map:lookup([max_keys], Opts)
+    }),
+    bin_map_to_str_proplist(OptsMap).
 
 normalize_bucket_attribute(acl, Raw0) ->
     Raw = p2m(Raw0),
