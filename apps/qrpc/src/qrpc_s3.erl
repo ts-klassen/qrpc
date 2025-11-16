@@ -40,6 +40,7 @@
       , make_presigned_url/3
       , get_bucket_lifecycle/3
       , put_bucket_lifecycle/4
+      , delete_bucket_lifecycle/3
       , get_bucket_attribute/4
       , set_bucket_attribute/5
     ]).
@@ -431,6 +432,54 @@ put_bucket_lifecycle(Bucket, Policy, AKey, Conf) ->
               , detail => #{
                     bucket => Bucket
                   , policy => Policy
+                  , config => Conf
+                  , erlcloud_result => Raw
+                }
+              , is_known => false
+              , is_retryable => false
+              , class => error
+              , reason => Reason2
+              , stacktrace => []
+              , version => 1
+            })
+    end.
+
+-spec delete_bucket_lifecycle(
+        bucket(), access_key(), config()
+    ) -> ok.
+delete_bucket_lifecycle(Bucket, AKey, Conf) ->
+    AWS = aws_config(AKey, Conf),
+    BucketStr = binary_to_list(Bucket),
+    Raw = try erlcloud_s3:delete_bucket_lifecycle(BucketStr, AWS) catch
+        Class:Reason:Stack ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, s3, delete_bucket_lifecycle, failed]
+              , fault_source => external
+              , message => <<"Deleting S3 bucket lifecycle failed">>
+              , message_ja => <<"S3 バケットライフサイクル設定の削除に失敗しました"/utf8>>
+              , detail => #{
+                    bucket => Bucket
+                  , config => Conf
+                }
+              , is_known => false
+              , is_retryable => false
+              , class => Class
+              , reason => Reason
+              , stacktrace => Stack
+              , version => 1
+            })
+    end,
+    case Raw of
+        ok ->
+            ok;
+        {error, Reason2} ->
+            ?QRPC_ERROR(#{
+                id => [qrpc, s3, delete_bucket_lifecycle, failed]
+              , fault_source => external
+              , message => <<"Deleting S3 bucket lifecycle failed">>
+              , message_ja => <<"S3 バケットライフサイクル設定の削除に失敗しました"/utf8>>
+              , detail => #{
+                    bucket => Bucket
                   , config => Conf
                   , erlcloud_result => Raw
                 }
