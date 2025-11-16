@@ -286,7 +286,7 @@ set_bucket_attribute(Bucket, AttributeName, Attribute, AKey, Conf) ->
     ) -> list_buckets_result().
 list_buckets(AKey, Conf) ->
     AWS = aws_config(AKey, Conf),
-    Result = try erlcloud_s3:list_buckets(AWS) catch
+    Result0 = try erlcloud_s3:list_buckets(AWS) catch
         Class:Reason:Stack ->
             ?QRPC_ERROR(#{
                 id => [qrpc, s3, list_buckets, failed]
@@ -305,22 +305,20 @@ list_buckets(AKey, Conf) ->
             })
     end,
     try
-        OwnerPL = proplists:get_value(owner, Result, []),
+        Result = p2m(Result0),
+        Owner0 = p2m(maps:get(owner, Result, [])),
         Owner = klsn_map:filter(#{
-            id => owner_field(id, OwnerPL),
-            display_name => owner_field(display_name, OwnerPL),
-            uri => owner_field(uri, OwnerPL)
+            id => s2b(klsn_map:lookup([id], Owner0)),
+            display_name => s2b(klsn_map:lookup([display_name], Owner0)),
+            uri => s2b(klsn_map:lookup([uri], Owner0))
         }),
-        BucketsPL = proplists:get_value(buckets, Result, []),
-        Buckets = lists:map(
-          fun(BucketPL) ->
-                  #{
-                      name => klsn_binstr:from_any(proplists:get_value(name, BucketPL)),
-                      creation_date => proplists:get_value(creation_date, BucketPL)
-                  }
-          end,
-          BucketsPL
-        ),
+        Buckets = lists:map(fun(Bucket0) ->
+            Bucket = p2m(Bucket0),
+            #{
+                name => s2b(maps:get(name, Bucket)),
+                creation_date => maps:get(creation_date, Bucket)
+            }
+        end, maps:get(buckets, Result, [])),
         #{
             owner => Owner
           , buckets => Buckets
@@ -334,7 +332,7 @@ list_buckets(AKey, Conf) ->
               , message_ja => <<"外部 API から不正な応答がありました"/utf8>>
               , detail => #{
                     config => Conf
-                  , erlcloud_result => Result
+                  , erlcloud_result => Result0
                 }
               , is_known => false
               , is_retryable => false
@@ -511,45 +509,36 @@ port_spec(#aws_config{s3_port = 443}) -> "";
 port_spec(#aws_config{s3_port = Port}) ->
     [":", erlang:integer_to_list(Port)].
 
-owner_field(Key, OwnerPL) ->
-    case proplists:get_value(Key, OwnerPL, undefined) of
-        undefined ->
-            none;
-        Value ->
-            {value, klsn_binstr:from_any(Value)}
-    end.
-
-normalize_bucket_attribute(acl, Raw) ->
-    OwnerPL = proplists:get_value(owner, Raw, []),
+normalize_bucket_attribute(acl, Raw0) ->
+    Raw = p2m(Raw0),
+    Owner0 = p2m(maps:get(owner, Raw, [])),
     Owner = klsn_map:filter(#{
-        id => owner_field(id, OwnerPL),
-        display_name => owner_field(display_name, OwnerPL),
-        uri => owner_field(uri, OwnerPL)
+        id => s2b(klsn_map:lookup([id], Owner0)),
+        display_name => s2b(klsn_map:lookup([display_name], Owner0)),
+        uri => s2b(klsn_map:lookup([uri], Owner0))
     }),
-    GrantsPL = proplists:get_value(access_control_list, Raw, []),
-    Grants = lists:map(fun normalize_acl_grant/1, GrantsPL),
+    Grants0 = maps:get(access_control_list, Raw, []),
+    Grants = lists:map(fun normalize_acl_grant/1, Grants0),
     #{
         owner => Owner,
         access_control_list => Grants
     };
 normalize_bucket_attribute(location, Raw) ->
-    klsn_binstr:from_any(Raw);
+    s2b(Raw);
 normalize_bucket_attribute(logging, {enabled, false}) ->
     #{enabled => false};
-normalize_bucket_attribute(logging, Raw) when is_list(Raw) ->
+normalize_bucket_attribute(logging, Raw0) when is_list(Raw0) ->
     %% NOTE: erlcloud_s3:get_bucket_attribute/3 currently returns logging grants
     %% under the misspelled key 'target_trants'. We treat that as an upstream
     %% typo and normalize it here to the correctly named 'target_grants'.
     %% Raw is [{enabled,true}, {target_bucket,...}, {target_prefix,...}, {target_trants, GrantsPL}]
-    Enabled = proplists:get_value(enabled, Raw, false),
-    TargetBucket = proplists:get_value(target_bucket, Raw, undefined),
-    TargetPrefix = proplists:get_value(target_prefix, Raw, undefined),
-    TargetTrantsPL = proplists:get_value(target_trants, Raw, []),
-    TargetTrants = lists:map(fun normalize_acl_grant/1, TargetTrantsPL),
+    Raw = p2m(Raw0),
+    TargetTrants0 = maps:get(target_trants, Raw, []),
+    TargetTrants = lists:map(fun normalize_acl_grant/1, TargetTrants0),
     klsn_map:filter(#{
-        enabled => {value, Enabled},
-        target_bucket => maybe_bin(TargetBucket),
-        target_prefix => maybe_bin(TargetPrefix),
+        enabled => {value, maps:get(enabled, Raw, false)},
+        target_bucket => s2b(klsn_map:lookup([target_bucket], Raw)),
+        target_prefix => s2b(klsn_map:lookup([target_prefix], Raw)),
         target_grants => {value, TargetTrants}
     });
 normalize_bucket_attribute(mfa_delete, Raw) ->
@@ -570,14 +559,15 @@ normalize_bucket_attribute(notification, Raw) when is_list(Raw) ->
         Raw
     ).
 
-normalize_acl_grant(GrantPL) ->
-    GranteePL = proplists:get_value(grantee, GrantPL, []),
-    Permission = proplists:get_value(permission, GrantPL),
+normalize_acl_grant(Grant0) ->
+    Grant = p2m(Grant0),
+    Grantee0 = p2m(maps:get(grantee, Grant, [])),
+    Permission = maps:get(permission, Grant),
     Grantee = klsn_map:filter(#{
-        type => maybe_bin(proplists:get_value(type, GranteePL, undefined)),
-        id => maybe_bin(proplists:get_value(id, GranteePL, undefined)),
-        display_name => maybe_bin(proplists:get_value(display_name, GranteePL, undefined)),
-        uri => maybe_bin(proplists:get_value(uri, GranteePL, undefined))
+        type => {value, s2b(maps:get(type, Grantee0))},
+        id => s2b(klsn_map:lookup([id], Grantee0)),
+        display_name => s2b(klsn_map:lookup([display_name], Grantee0)),
+        uri => s2b(klsn_map:lookup([uri], Grantee0))
     }),
     #{
         grantee => Grantee,
@@ -585,49 +575,35 @@ normalize_acl_grant(GrantPL) ->
     }.
 
 normalize_notification_config(ConfType, ConfPL) ->
-    Arn = case ConfType of
-        topic_configuration -> proplists:get_value(topic, ConfPL);
-        queue_configuration -> proplists:get_value(queue, ConfPL);
-        cloud_function_configuration -> proplists:get_value(cloud_function, ConfPL)
+    Conf = p2m(ConfPL),
+    Arn0 = case ConfType of
+        topic_configuration -> maps:get(topic, Conf);
+        queue_configuration -> maps:get(queue, Conf);
+        cloud_function_configuration -> maps:get(cloud_function, Conf)
     end,
-    Id = proplists:get_value(id, ConfPL, undefined),
+    Arn = s2b(Arn0),
     %% erlcloud encodes notification events as a single `{event, [StringEvents]}`
     %% entry (see `?S3_BUCKET_EVENTS_LIST` in erlcloud). `get_all_values/2`
     %% would therefore yield a list whose only element is the entire list of
     %% string events, which in turn would be collapsed into a single binary.
     %% Instead, fetch the inner list and map over it so each event is preserved.
     Events = lists:map(
-        fun klsn_binstr:from_any/1,
-        proplists:get_value(event, ConfPL, [])
+        fun s2b/1,
+        maps:get(event, Conf)
     ),
-    Filter0 = proplists:get_value(filter, ConfPL, []),
-    Filter =
-        case Filter0 of
-            {filter, List} ->
-                lists:map(
-                    fun({Name, Value}) ->
-                        #{
-                            name => Name,
-                            value => klsn_binstr:from_any(Value)
-                        }
-                    end,
-                    List
-                );
-            _ ->
-                []
-        end,
+    Filter = lists:map(fun({Name, Value}) ->
+        #{
+            name => Name,
+            value => s2b(Value)
+        }
+    end, maps:get(filter, Conf, [])),
     klsn_map:filter(#{
         type => {value, ConfType},
-        arn => maybe_bin(Arn),
-        id => maybe_bin(Id),
+        arn => {value, Arn},
+        id => s2b(klsn_map:lookup([id], Conf)),
         events => {value, Events},
         filter => {value, Filter}
     }).
-
-maybe_bin(undefined) ->
-    none;
-maybe_bin(V) ->
-    {value, klsn_binstr:from_any(V)}.
 
 denormalize_bucket_attribute(acl, Attr) ->
     Owner = maps:get(owner, Attr, #{}),
@@ -734,3 +710,18 @@ bin_map_to_str_proplist(List) when is_list(List) ->
     end, List);
 bin_map_to_str_proplist(Term) ->
     Term.
+
+-spec s2b(klsn:binstr()) -> klsn:binstr();
+         (string()) -> klsn:binstr();
+         ({value, klsn:binstr() | string()}) -> {value, klsn:binstr()};
+         (none) -> none.
+s2b(String) when is_list(String) ->
+    iolist_to_binary(String);
+s2b({value, Value}) ->
+    {value, s2b(Value)};
+s2b(Other) ->
+    Other.
+
+-spec p2m(proplists:proplist()) -> map().
+p2m(Proplist) ->
+    proplists:to_map(Proplist).
