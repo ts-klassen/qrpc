@@ -48,7 +48,7 @@
 -spec request_rule() -> qrpc_sanitizer:rule().
 request_rule() ->
     #{
-        method => {r, {atom, [
+        method => {o, {atom, [
             head, get, put, patch, post, trace, options, delete
         ]}}
       , url => {r, binstr}
