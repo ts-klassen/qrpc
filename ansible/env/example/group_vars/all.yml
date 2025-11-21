@@ -18,7 +18,6 @@ qrpc_source_path: "{{ qrpc_repo_root }}/_release_packages/qrpc-{{ qrpc_version }
 # directly in this file once encrypted with Ansible Vault. The list below
 # illustrates the expected record structure.
 cloudflare_api_token: "REPLACE_WITH_REAL_TOKEN"
-cloudflare_ca_bundle: "/etc/ssl/certs/ca-certificates.crt"
 cloudflare_dns_records:
   - zone: "example.net"
     type: "A"

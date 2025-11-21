@@ -11,6 +11,7 @@ DEPENDS+=       qrpc-prod>=0.1.0:../../meta-pkgs/qrpc-prod
 DEPENDS+=       pkg_tarup>=1.9.1:../../pkgtools/pkg_tarup
 DEPENDS+=       ansible>=12.1.0:../../sysutils/ansible
 DEPENDS+=       nodejs>=22.21.1:../../lang/nodejs22
+DEPENDS+=       mit-krb5>=1.21.3:../../security/mit-krb5
 
 LICENSE=        apache-2.0
 

@@ -19,28 +19,6 @@
   loop_control:
     label: "{{ item.type }} {{ item.name }}"
 
-- name: "Check Cloudflare CA bundle exists when provided"
-  ansible.builtin.stat:
-    path: "{{ cloudflare_ca_bundle }}"
-  register: cloudflare_ca_bundle_stat
-  when: cloudflare_ca_bundle | length > 0
-
-- name: "Fail if Cloudflare CA bundle is missing"
-  ansible.builtin.assert:
-    that:
-      - cloudflare_ca_bundle_stat.stat.exists
-    fail_msg: "cloudflare_ca_bundle path '{{ cloudflare_ca_bundle }}' does not exist."
-  when: cloudflare_ca_bundle | length > 0
-
-- name: "Set Cloudflare SSL environment overrides"
-  ansible.builtin.set_fact:
-    cloudflare_ssl_env: >-
-      {{ {'SSL_CERT_DIR': cloudflare_ca_bundle}
-         if (cloudflare_ca_bundle | length > 0 and cloudflare_ca_bundle_stat.stat.isdir | default(false))
-         else ({'SSL_CERT_FILE': cloudflare_ca_bundle}
-               if (cloudflare_ca_bundle | length > 0)
-               else {}) }}
-
 - name: "Ensure DNS records match desired state"
   community.general.cloudflare_dns:
     api_token: "{{ cloudflare_api_token }}"
@@ -53,7 +31,6 @@
     priority: "{{ item.priority | default(omit) }}"
     comment: "{{ item.comment | default(omit) }}"
     state: "{{ item.state | default('present') }}"
-  environment: "{{ (cloudflare_ssl_env | default({})) | combine((cloudflare_ca_bundle | length > 0) | ternary({'REQUESTS_CA_BUNDLE': cloudflare_ca_bundle}, {})) }}"
   loop: "{{ cloudflare_dns_records }}"
   loop_control:
     label: "{{ item.type }} {{ item.name }} -> {{ item.content }}"

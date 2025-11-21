@@ -8,6 +8,11 @@ install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc/stderr
 install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/dlog
 install -d -o qrpc -g qrpc -m 0750 /opt/qrpc/rel
 ./pkg_add -u qrpc-prod-*.tgz
+cat > /opt/qrpc/pkg/etc/ca-certificates-dir.conf << EOF
+ETCCERTSDIR=/opt/qrpc/pkg/etc/openssl/certs
+EOF
+mkdir -p /opt/qrpc/pkg/etc/openssl/certs
+/opt/qrpc/pkg/sbin/update-ca-certificates
 tar -xzf qrpc.tgz -C /opt/qrpc/rel
 install -m0755 foreground.sh /opt/qrpc/qrpc_foreground.sh
 cp qrpc.service /etc/systemd/system/.

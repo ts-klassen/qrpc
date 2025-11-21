@@ -68,6 +68,6 @@ Cloudflare DNS
 --------------
 
 - `roles/cloudflare_dns/` uses the Cloudflare API (community.general collection) to ensure DNS records exist or are removed; it runs entirely on the control node (`hosts: localhost`).
-- Define `cloudflare_dns_records` and `cloudflare_api_token` in your private copy of `group_vars/all.yml` (or another vars file) following the example structure in `ansible/env/example/group_vars/all.yml`. Keep that file under Ansible Vault so the token stays encrypted. `cloudflare_ca_bundle` defaults to `/etc/ssl/certs/ca-certificates.crt` (matches curl on the control node); override it only if you rely on a custom bundle.
+- Define `cloudflare_dns_records` and `cloudflare_api_token` in your private copy of `group_vars/all.yml` (or another vars file) following the example structure in `ansible/env/example/group_vars/all.yml`. Keep that file under Ansible Vault so the token stays encrypted.
 - Run it from the repo root whenever you need to sync DNS:
   `/opt/qrpc/pkg/bin/ansible-playbook -i ansible/env/real/inventory.yml ansible/playbooks/cloudflare_dns.yml`
