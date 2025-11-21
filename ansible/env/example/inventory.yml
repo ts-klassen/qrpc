@@ -1,0 +1,15 @@
+---
+# Example inventory for qrpc deployment (YAML).
+# Copy this file into ansible/env/real/inventory.yml and replace the hostnames
+# and SSH settings with your own.
+# The playbook requires you to pass an explicit FQDN via `-e qrpc_target_host=...`
+# so there is no need for environment/group names here.
+
+all:
+  hosts:
+    qrpc-app01.example.com:
+      ansible_user: ubuntu
+      ansible_ssh_private_key_file: ~/.ssh/qrpc-id_rsa
+
+    qrpc-app02.example.com: {}
+    qrpc-app03.example.com: {}

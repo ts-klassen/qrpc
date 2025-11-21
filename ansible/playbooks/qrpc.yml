@@ -1,0 +1,8 @@
+---
+# Generic playbook for deploying qrpc via the bundled role.
+# Always pass `-e qrpc_target_host=<fqdn>` when running it.
+- name: Deploy qrpc
+  hosts: "{{ qrpc_target_host }}"
+  become: yes
+  roles:
+    - qrpc

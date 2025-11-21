@@ -1,0 +1,15 @@
+---
+# Example shared vars for all qrpc hosts.
+# Copy this file to ansible/env/real/group_vars/all.yml and
+# update values to match your release/versioning strategy.
+
+# Version and source of the qrpc release.
+qrpc_version: "0.1.0"
+qrpc_arch: "x86_64-unknown-linux-gnu"
+
+# Use the locally built tarball on the control node by default.
+# The qrpc_repo_root variable (defined in the role defaults) points
+# to the root of this git checkout regardless of where your playbook
+# lives under ansible/.
+qrpc_source_type: "local"
+qrpc_source_path: "{{ qrpc_repo_root }}/_release_packages/qrpc-{{ qrpc_version }}-{{ qrpc_arch }}.tar.gz"

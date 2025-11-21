@@ -1,0 +1,4 @@
+---
+# Example per-host vars for qrpc-app01.example.com
+# Point to the Erlang config that lives alongside your inventory.
+qrpc_config_source: "{{ inventory_dir }}/configs/qrpc-app01.config"

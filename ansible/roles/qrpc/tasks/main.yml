@@ -1,0 +1,103 @@
+---
+- name: "Fail if not running on Ubuntu 24.04"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] == "Debian"
+      - ansible_facts['distribution'] == "Ubuntu"
+      - ansible_facts['distribution_version'] is version("24.04", "==")
+    fail_msg: "This role only supports Ubuntu 24.04."
+
+- name: "Ensure base packages are installed"
+  ansible.builtin.apt:
+    name:
+      - bash
+      - tar
+      - systemd
+      - systemd-sysv
+      - passwd
+    state: latest
+    update_cache: yes
+  become: yes
+
+- name: "Create remote release directory"
+  ansible.builtin.file:
+    path: "{{ qrpc_remote_release_dir }}"
+    state: directory
+    mode: "0755"
+  become: yes
+
+- name: "Determine artifact URL when source_type == artifact"
+  ansible.builtin.set_fact:
+    qrpc_effective_artifact_url: >-
+      {{ qrpc_artifact_url
+         if qrpc_artifact_url | length > 0
+         else (qrpc_artifact_base_url | trim('/') + '/' + qrpc_tarball_name) }}
+  when: qrpc_source_type == "artifact"
+
+- name: "Copy release tarball from control node (local source)"
+  ansible.builtin.copy:
+    src: "{{ qrpc_source_path }}"
+    dest: "{{ qrpc_remote_release_dir }}/{{ qrpc_tarball_name }}"
+    mode: "0644"
+  when: qrpc_source_type == "local"
+
+- name: "Download release tarball from URL"
+  ansible.builtin.get_url:
+    url: "{{ qrpc_source_url }}"
+    dest: "{{ qrpc_remote_release_dir }}/{{ qrpc_tarball_name }}"
+    mode: "0644"
+  when: qrpc_source_type == "url"
+
+- name: "Download release tarball from artifact URL"
+  ansible.builtin.get_url:
+    url: "{{ qrpc_effective_artifact_url }}"
+    dest: "{{ qrpc_remote_release_dir }}/{{ qrpc_tarball_name }}"
+    mode: "0644"
+  when: qrpc_source_type == "artifact"
+
+- name: "Unpack qrpc release tarball"
+  ansible.builtin.unarchive:
+    src: "{{ qrpc_remote_release_dir }}/{{ qrpc_tarball_name }}"
+    dest: "{{ qrpc_remote_release_dir }}"
+    remote_src: yes
+  become: yes
+
+- name: "Run qrpc install script (always)"
+  ansible.builtin.command: "./install.sh"
+  args:
+    chdir: "{{ qrpc_remote_release_dir }}/{{ qrpc_release_dirname }}"
+  become: yes
+
+- name: "Ensure qrpc config directory exists"
+  ansible.builtin.file:
+    path: "{{ qrpc_config_path | dirname }}"
+    state: directory
+    owner: qrpc
+    group: qrpc
+    mode: "0700"
+  become: yes
+
+- name: "Copy /opt/qrpc/etc/qrpc/qrpc.config from control node"
+  ansible.builtin.copy:
+    src: "{{ qrpc_config_source }}"
+    dest: "{{ qrpc_config_path }}"
+    owner: qrpc
+    group: qrpc
+    mode: "0600"
+  when: qrpc_config_source is defined and qrpc_config_source | length > 0
+  become: yes
+
+- name: "Ensure qrpc service is enabled and started"
+  ansible.builtin.systemd:
+    name: qrpc
+    enabled: yes
+    state: restarted
+    daemon_reload: yes
+  become: yes
+
+- name: "Verify qrpc service is active"
+  ansible.builtin.command: "systemctl is-active qrpc"
+  register: qrpc_systemctl_status
+  changed_when: false
+  failed_when: qrpc_systemctl_status.stdout.strip() != "active"
+  become: yes

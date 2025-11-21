@@ -1,0 +1,41 @@
+---
+# Default variables for qrpc deployment
+
+qrpc_version: "0.1.0"
+qrpc_arch: "x86_64-unknown-linux-gnu"
+
+# Absolute path to the project root derived from playbook_dir.
+# This lets real playbooks live anywhere under ansible/ without
+# hard-coding repo-specific inventory names.
+qrpc_repo_root: "{{ playbook_dir | regex_replace('/ansible(/.*)?$', '') }}"
+
+# Where the release tarball comes from.
+# One of: local, url, artifact
+qrpc_source_type: "local"
+
+# When qrpc_source_type == "local", this is a path on the control node.
+# Default: tarball in the repo root's _release_packages directory.
+qrpc_source_path: "{{ qrpc_repo_root }}/_release_packages/qrpc-{{ qrpc_version }}-{{ qrpc_arch }}.tar.gz"
+
+# When qrpc_source_type == "url", this must be a full URL.
+qrpc_source_url: ""
+
+# When qrpc_source_type == "artifact", you can either override
+# qrpc_artifact_url directly or set base vars to construct it.
+qrpc_artifact_url: ""
+qrpc_artifact_base_url: ""
+
+# Remote working directory where the tarball is stored and unpacked.
+qrpc_remote_release_dir: "/opt/qrpc/releases/{{ qrpc_version }}"
+
+# Derived name of the tarball and extracted directory.
+qrpc_tarball_name: "qrpc-{{ qrpc_version }}-{{ qrpc_arch }}.tar.gz"
+qrpc_release_dirname: "qrpc-{{ qrpc_version }}-{{ qrpc_arch }}"
+
+# Path to the config file on the remote host.
+qrpc_config_path: "/opt/qrpc/etc/qrpc/qrpc.config"
+
+# Path on the control node to the Erlang config file to copy.
+# This should point to a per-host file in a gitignored directory
+# such as ansible/env/real/configs/<hostname>-qrpc.config.
+qrpc_config_source: ""

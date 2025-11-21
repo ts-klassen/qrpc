@@ -1,0 +1,3 @@
+---
+# Example per-host vars for qrpc-app02.example.com
+qrpc_config_source: "{{ inventory_dir }}/configs/qrpc-app02.config"
