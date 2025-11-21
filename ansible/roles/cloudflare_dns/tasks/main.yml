@@ -1,0 +1,59 @@
+---
+- name: "Fail if Cloudflare token or records are missing"
+  ansible.builtin.assert:
+    that:
+      - cloudflare_api_token | length > 0
+      - cloudflare_dns_records is defined
+      - cloudflare_dns_records | length > 0
+    fail_msg: "cloudflare_dns_records must be defined and cloudflare_api_token has to be set."
+
+- name: "Validate Cloudflare record definitions"
+  ansible.builtin.assert:
+    that:
+      - item.zone | length > 0
+      - item.type | length > 0
+      - item.name | length > 0
+      - item.content is defined
+    fail_msg: "Each record needs zone, type, name, and content."
+  loop: "{{ cloudflare_dns_records }}"
+  loop_control:
+    label: "{{ item.type }} {{ item.name }}"
+
+- name: "Check Cloudflare CA bundle exists when provided"
+  ansible.builtin.stat:
+    path: "{{ cloudflare_ca_bundle }}"
+  register: cloudflare_ca_bundle_stat
+  when: cloudflare_ca_bundle | length > 0
+
+- name: "Fail if Cloudflare CA bundle is missing"
+  ansible.builtin.assert:
+    that:
+      - cloudflare_ca_bundle_stat.stat.exists
+    fail_msg: "cloudflare_ca_bundle path '{{ cloudflare_ca_bundle }}' does not exist."
+  when: cloudflare_ca_bundle | length > 0
+
+- name: "Set Cloudflare SSL environment overrides"
+  ansible.builtin.set_fact:
+    cloudflare_ssl_env: >-
+      {{ {'SSL_CERT_DIR': cloudflare_ca_bundle}
+         if (cloudflare_ca_bundle | length > 0 and cloudflare_ca_bundle_stat.stat.isdir | default(false))
+         else ({'SSL_CERT_FILE': cloudflare_ca_bundle}
+               if (cloudflare_ca_bundle | length > 0)
+               else {}) }}
+
+- name: "Ensure DNS records match desired state"
+  community.general.cloudflare_dns:
+    api_token: "{{ cloudflare_api_token }}"
+    zone: "{{ item.zone }}"
+    type: "{{ item.type }}"
+    record: "{{ item.name }}"
+    value: "{{ item.content }}"
+    ttl: "{{ item.ttl | default(1) }}"
+    proxied: "{{ item.proxied | default(false) }}"
+    priority: "{{ item.priority | default(omit) }}"
+    comment: "{{ item.comment | default(omit) }}"
+    state: "{{ item.state | default('present') }}"
+  environment: "{{ (cloudflare_ssl_env | default({})) | combine((cloudflare_ca_bundle | length > 0) | ternary({'REQUESTS_CA_BUNDLE': cloudflare_ca_bundle}, {})) }}"
+  loop: "{{ cloudflare_dns_records }}"
+  loop_control:
+    label: "{{ item.type }} {{ item.name }} -> {{ item.content }}"

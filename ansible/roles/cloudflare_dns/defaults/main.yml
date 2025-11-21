@@ -1,0 +1,12 @@
+---
+# Default settings for Cloudflare DNS management
+
+# Cloudflare API token must be provided via vars (e.g., Ansible Vault).
+cloudflare_api_token: ""
+
+# List of DNS records to manage. See ansible/env/example/group_vars/all.yml for shape.
+cloudflare_dns_records: []
+
+# Optional CA bundle path for Cloudflare API calls. Default to the system trust
+# store (works with curl on this host); override if you need a custom bundle.
+cloudflare_ca_bundle: "/etc/ssl/certs/ca-certificates.crt"

@@ -13,3 +13,16 @@ qrpc_arch: "x86_64-unknown-linux-gnu"
 # lives under ansible/.
 qrpc_source_type: "local"
 qrpc_source_path: "{{ qrpc_repo_root }}/_release_packages/qrpc-{{ qrpc_version }}-{{ qrpc_arch }}.tar.gz"
+
+# Cloudflare DNS management (optional). Define `cloudflare_api_token`
+# directly in this file once encrypted with Ansible Vault. The list below
+# illustrates the expected record structure.
+cloudflare_api_token: "REPLACE_WITH_REAL_TOKEN"
+cloudflare_ca_bundle: "/etc/ssl/certs/ca-certificates.crt"
+cloudflare_dns_records:
+  - zone: "example.net"
+    type: "A"
+    name: "app01"
+    content: "203.0.113.10"
+    proxied: false
+    ttl: 300

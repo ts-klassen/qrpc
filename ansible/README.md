@@ -21,7 +21,7 @@ Quick start
 -----------
 
 1. Build the release tarball: `./Build package`
-2. Bootstrap a private environment (one-time):  
+2. Bootstrap a private environment (one-time):
    `cp -R ansible/env/example ansible/env/real`
 3. Edit the files in `ansible/env/real/` to match your hosts.
 4. Deploy from the repo root (replace the hostname with one from your inventory):
@@ -63,3 +63,11 @@ Working with real data
   always name a specific host via `qrpc_target_host`, so groups are optional.
 - The role never templates your Erlang config: whatever file you point
   `qrpc_config_source` at is copied byte-for-byte to the remote host.
+
+Cloudflare DNS
+--------------
+
+- `roles/cloudflare_dns/` uses the Cloudflare API (community.general collection) to ensure DNS records exist or are removed; it runs entirely on the control node (`hosts: localhost`).
+- Define `cloudflare_dns_records` and `cloudflare_api_token` in your private copy of `group_vars/all.yml` (or another vars file) following the example structure in `ansible/env/example/group_vars/all.yml`. Keep that file under Ansible Vault so the token stays encrypted. `cloudflare_ca_bundle` defaults to `/etc/ssl/certs/ca-certificates.crt` (matches curl on the control node); override it only if you rely on a custom bundle.
+- Run it from the repo root whenever you need to sync DNS:
+  `/opt/qrpc/pkg/bin/ansible-playbook -i ansible/env/real/inventory.yml ansible/playbooks/cloudflare_dns.yml`

@@ -1,0 +1,8 @@
+---
+# Manage DNS records in Cloudflare via the bundled role.
+- name: Manage Cloudflare DNS
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - cloudflare_dns
