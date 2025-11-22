@@ -54,10 +54,18 @@ case "$1" in
     ;;
   devel)
     ./Build mount
-    rsync -a meta-pkgs _pkgsrc/
+    rsync -a config/pkgsrc/files/ _pkgsrc/
     cd _pkgsrc
       git stash && git pull && git stash pop
     cd ..
+    for patch in config/pkgsrc/patches/patch-*; do
+      [ -e "$patch" ] || break
+      if patch -d _pkgsrc --dry-run -R -p0 < "$patch" >/dev/null 2>&1; then
+        echo "Patch ${patch} already applied, skipping"
+        continue
+      fi
+      patch -d _pkgsrc -p0 -N < "$patch"
+    done
     sudo chroot _root /usr/bin/bash -ilc 'cd /root/pkgsrc/meta-pkgs/qrpc-devel && bmake update'
     ;;
   root)

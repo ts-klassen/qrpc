@@ -1,0 +1,15 @@
+$NetBSD$
+
+Add qrpc meta-packages to the category list.
+
+--- meta-pkgs/Makefile.orig
++++ meta-pkgs/Makefile
+@@ -54,6 +54,8 @@
+ SUBDIR+=	pkg_developer
+ SUBDIR+=	pkgsrc-guide-tools
+ SUBDIR+=	qmail-server
++SUBDIR+=	qrpc-devel
++SUBDIR+=	qrpc-prod
+ SUBDIR+=	qt6
+ SUBDIR+=	rime-data
+ SUBDIR+=	ruby-gnome
