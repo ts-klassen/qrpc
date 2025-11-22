@@ -1,0 +1,22 @@
+{% set ingress_rules = (cloudflare_tunnel_template_ctx.ingress | default([])) + ([{'service': cloudflare_tunnel_template_ctx.fallback_service}] if cloudflare_tunnel_template_ctx.fallback_service else []) %}
+{% set tunnel_identifier = cloudflare_tunnel_template_ctx.tunnel_id | default(cloudflare_tunnel_template_ctx.id | default(cloudflare_tunnel_template_ctx.name)) %}
+tunnel: {{ tunnel_identifier }}
+credentials-file: {{ cloudflare_tunnel_template_ctx.credentials_path }}
+{% if cloudflare_tunnel_template_ctx.metrics_endpoint %}
+metrics: {{ cloudflare_tunnel_template_ctx.metrics_endpoint }}
+{% endif %}
+{% if cloudflare_tunnel_template_ctx.origin_request %}
+originRequest:
+{{ cloudflare_tunnel_template_ctx.origin_request | to_nice_yaml(indent=2) | regex_replace('^---\n', '') | indent(2, True) }}
+{% endif %}
+{% if cloudflare_tunnel_template_ctx.warp_routing %}
+warp-routing:
+{{ cloudflare_tunnel_template_ctx.warp_routing | to_nice_yaml(indent=2) | regex_replace('^---\n', '') | indent(2, True) }}
+{% endif %}
+{% if ingress_rules %}
+ingress:
+{{ ingress_rules | to_nice_yaml(indent=2) | regex_replace('^---\n', '') | indent(2, True) }}
+{% endif %}
+{% if cloudflare_tunnel_template_ctx.extra_config %}
+{{ cloudflare_tunnel_template_ctx.extra_config | to_nice_yaml(indent=2) | regex_replace('^---\n', '') }}
+{% endif %}

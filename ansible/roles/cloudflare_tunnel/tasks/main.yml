@@ -1,0 +1,106 @@
+---
+- name: "Ensure this role runs on Debian-based hosts"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] == "Debian"
+    fail_msg: "cloudflare_tunnel role currently supports Debian/Ubuntu hosts only."
+
+- name: "Ensure at least one Cloudflare tunnel is defined"
+  ansible.builtin.assert:
+    that:
+      - cloudflare_tunnels is defined
+      - cloudflare_tunnels | length > 0
+    fail_msg: "Define cloudflare_tunnels (list with at least one entry) before applying this role."
+
+- name: "Determine apt repository codename"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_repo_codename_effective: >-
+      {{
+        (cloudflare_tunnel_repo_codename
+         if cloudflare_tunnel_repo_codename | length > 0
+         else ansible_facts.get('lsb', {}).get('codename')
+        ) | default(ansible_facts.get('distribution_release'), true) | default('any')
+      }}
+
+- name: "Remove legacy Cloudflare apt source files"
+  ansible.builtin.file:
+    path: "/etc/apt/sources.list.d/{{ item }}"
+    state: absent
+  loop:
+    - "{{ cloudflare_tunnel_repo_list_filename }}.list"
+    - "cloudflared.list"
+  become: yes
+  when: cloudflare_tunnel_manage_repo
+
+- name: "Ensure apt helpers are present"
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - gnupg
+    state: present
+  become: yes
+  when: cloudflare_tunnel_manage_repo
+
+- name: "Ensure Cloudflare keyring directory exists"
+  ansible.builtin.file:
+    path: "{{ cloudflare_tunnel_repo_key_path | dirname }}"
+    state: directory
+    mode: "0755"
+  become: yes
+  when: cloudflare_tunnel_manage_repo
+
+- name: "Download Cloudflare apt key"
+  ansible.builtin.get_url:
+    url: "{{ cloudflare_tunnel_repo_key_url }}"
+    dest: "{{ cloudflare_tunnel_repo_key_path }}"
+    mode: "0644"
+  become: yes
+  when: cloudflare_tunnel_manage_repo
+
+- name: "Write Cloudflare apt source"
+  ansible.builtin.copy:
+    dest: "/etc/apt/sources.list.d/{{ cloudflare_tunnel_repo_list_filename }}.sources"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      Types: deb
+      URIs: {{ cloudflare_tunnel_repo_url }}
+      Suites: {{ cloudflare_tunnel_repo_codename_effective }}
+      Components: main
+      Signed-By: {{ cloudflare_tunnel_repo_key_path }}
+  become: yes
+  when: cloudflare_tunnel_manage_repo
+
+- name: "Update apt cache after adding Cloudflare repo"
+  ansible.builtin.apt:
+    update_cache: yes
+  become: yes
+  when: cloudflare_tunnel_manage_repo
+
+- name: "Ensure cloudflared package is installed"
+  ansible.builtin.apt:
+    name: "{{ cloudflare_tunnel_package_name }}"
+    state: "{{ cloudflare_tunnel_package_state }}"
+  become: yes
+
+- name: "Ensure /etc/cloudflared exists"
+  ansible.builtin.file:
+    path: "{{ cloudflare_tunnel_config_dir }}"
+    state: directory
+    owner: "{{ cloudflare_tunnel_service_user }}"
+    group: "{{ cloudflare_tunnel_service_group }}"
+    mode: "0750"
+  become: yes
+
+- name: "Configure Cloudflare tunnels"
+  ansible.builtin.include_tasks:
+    file: per_tunnel.yml
+    apply:
+      vars:
+        cloudflare_tunnel_current: "{{ cloudflare_tunnel_item }}"
+  loop: "{{ cloudflare_tunnels }}"
+  loop_control:
+    loop_var: cloudflare_tunnel_item
+    label: "{{ cloudflare_tunnel_item.name | default('unnamed') }}"

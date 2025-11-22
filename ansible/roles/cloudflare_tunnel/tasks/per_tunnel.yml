@@ -1,0 +1,303 @@
+---
+- name: "Prepare tunnel context"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx:
+      name: "{{ cloudflare_tunnel_current.name | default('') }}"
+      account_id: "{{ cloudflare_tunnel_current.account_id | default(cloudflare_tunnel_account_id) }}"
+      api_token: "{{ cloudflare_tunnel_current.api_token | default(cloudflare_api_token) }}"
+      ingress: "{{ cloudflare_tunnel_current.ingress | default([]) }}"
+      fallback_service: "{{ cloudflare_tunnel_current.fallback_service | default(cloudflare_tunnel_fallback_service) }}"
+      metrics_endpoint: "{{ cloudflare_tunnel_current.metrics_endpoint | default(cloudflare_tunnel_metrics_endpoint) }}"
+      origin_request: "{{ cloudflare_tunnel_current.origin_request | default(cloudflare_tunnel_origin_request) }}"
+      warp_routing: "{{ cloudflare_tunnel_current.warp_routing | default(cloudflare_tunnel_warp_routing) }}"
+      extra_config: "{{ cloudflare_tunnel_current.extra_config | default(cloudflare_tunnel_extra_config) }}"
+      credentials_json: "{{ cloudflare_tunnel_current.credentials_json | default(cloudflare_tunnel_credentials_json) }}"
+      config_path: "{{ cloudflare_tunnel_current.config_path | default(cloudflare_tunnel_config_dir ~ '/' ~ (cloudflare_tunnel_current.config_filename | default(cloudflare_tunnel_current.name ~ '.yml'))) }}"
+      credentials_path: "{{ cloudflare_tunnel_current.credentials_path | default(cloudflare_tunnel_config_dir ~ '/' ~ (cloudflare_tunnel_current.credentials_filename | default(cloudflare_tunnel_current.name ~ '.json'))) }}"
+      service_name: "{{ cloudflare_tunnel_current.service_name | default(cloudflare_tunnel_service_prefix ~ cloudflare_tunnel_current.name) }}"
+      service_user: "{{ cloudflare_tunnel_current.service_user | default(cloudflare_tunnel_service_user) }}"
+      service_group: "{{ cloudflare_tunnel_current.service_group | default(cloudflare_tunnel_service_group) }}"
+      service_extra_args: "{{ cloudflare_tunnel_current.service_extra_args | default(cloudflare_tunnel_service_extra_args) }}"
+      service_enabled: "{{ cloudflare_tunnel_current.service_enabled | default(cloudflare_tunnel_service_enabled) }}"
+      service_state: "{{ cloudflare_tunnel_current.service_state | default(cloudflare_tunnel_service_state) }}"
+      bin_path: "{{ cloudflare_tunnel_current.bin_path | default(cloudflare_tunnel_bin_path) }}"
+      manage_dns: "{{ cloudflare_tunnel_current.manage_dns | default(cloudflare_tunnel_manage_dns) }}"
+      dns_proxied: "{{ cloudflare_tunnel_current.dns_proxied | default(cloudflare_tunnel_dns_proxied) }}"
+      zone_name: "{{ cloudflare_tunnel_current.zone_name | default(cloudflare_tunnel_zone_name) }}"
+      zone_id: "{{ cloudflare_tunnel_current.zone_id | default(cloudflare_tunnel_zone_id) }}"
+
+- name: "Validate tunnel definition"
+  ansible.builtin.assert:
+    that:
+      - cloudflare_tunnel_ctx.name | length > 0
+      - cloudflare_tunnel_ctx.account_id | length > 0
+      - cloudflare_tunnel_ctx.api_token | length > 0
+    fail_msg: "Each tunnel needs name, account_id (or global default), and api_token (or global default)."
+
+- name: "Validate ingress definitions"
+  ansible.builtin.assert:
+    that:
+      - item.service is defined
+      - item.service | length > 0
+    fail_msg: "Every ingress entry for tunnel {{ cloudflare_tunnel_ctx.name }} must define a service."
+  loop: "{{ cloudflare_tunnel_ctx.ingress }}"
+  loop_control:
+    label: "{{ item.hostname | default(item.service) }}"
+
+- name: "Initialize per-tunnel scratch variables"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_secret: ""
+    cloudflare_tunnel_ctx_id: "{{ cloudflare_tunnel_current.id | default('') }}"
+    cloudflare_tunnel_ctx_existing: {}
+    cloudflare_tunnel_ctx_credentials_rendered: "{{ cloudflare_tunnel_ctx.credentials_json | default('') }}"
+    cloudflare_tunnel_dns_zone_cache: {}
+
+- name: "Check for existing credentials file"
+  ansible.builtin.stat:
+    path: "{{ cloudflare_tunnel_ctx.credentials_path }}"
+  register: cloudflare_tunnel_ctx_credentials_stat
+  become: yes
+
+- name: "Read existing credentials file"
+  ansible.builtin.slurp:
+    path: "{{ cloudflare_tunnel_ctx.credentials_path }}"
+  register: cloudflare_tunnel_ctx_credentials_slurp
+  when: cloudflare_tunnel_ctx_credentials_stat.stat.exists
+  become: yes
+  no_log: true
+
+- name: "Adopt credentials from existing file"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_credentials_rendered: >-
+      {{
+        cloudflare_tunnel_ctx_credentials_rendered
+        if cloudflare_tunnel_ctx_credentials_rendered | length > 0
+        else (cloudflare_tunnel_ctx_credentials_slurp.content | b64decode)
+      }}
+    cloudflare_tunnel_ctx_secret: "{{ (cloudflare_tunnel_ctx_credentials_slurp.content | b64decode | from_json).TunnelSecret | default(cloudflare_tunnel_ctx_secret) }}"
+    cloudflare_tunnel_ctx_id: "{{ (cloudflare_tunnel_ctx_credentials_slurp.content | b64decode | from_json).TunnelID | default(cloudflare_tunnel_ctx_id) }}"
+  when:
+    - cloudflare_tunnel_ctx_credentials_stat.stat.exists
+    - cloudflare_tunnel_ctx_credentials_slurp is defined
+    - cloudflare_tunnel_ctx_credentials_slurp.skipped is not defined
+  no_log: true
+
+- name: "Parse provided credentials JSON"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_credentials_data: "{{ cloudflare_tunnel_ctx.credentials_json | from_json }}"
+  when: cloudflare_tunnel_ctx.credentials_json | length > 0
+  no_log: true
+
+- name: "Use provided credentials JSON"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_credentials_rendered: "{{ cloudflare_tunnel_ctx.credentials_json }}"
+    cloudflare_tunnel_ctx_secret: "{{ cloudflare_tunnel_ctx_credentials_data.TunnelSecret | default(cloudflare_tunnel_ctx_secret) }}"
+    cloudflare_tunnel_ctx_id: "{{ cloudflare_tunnel_ctx_credentials_data.TunnelID | default(cloudflare_tunnel_ctx_id) }}"
+  when: cloudflare_tunnel_ctx.credentials_json | length > 0
+  no_log: true
+
+- name: "Query Cloudflare for existing tunnel"
+  ansible.builtin.uri:
+    url: "{{ cloudflare_tunnel_api_base_url }}/accounts/{{ cloudflare_tunnel_ctx.account_id }}/cfd_tunnel?name={{ cloudflare_tunnel_ctx.name | urlencode }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cloudflare_tunnel_ctx.api_token }}"
+      Content-Type: "application/json"
+      Accept: "application/json"
+    return_content: yes
+    status_code: 200
+    validate_certs: yes
+    timeout: "{{ cloudflare_tunnel_api_timeout }}"
+  delegate_to: localhost
+  register: cloudflare_tunnel_ctx_query
+  no_log: true
+
+- name: "Capture existing tunnel details"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_existing: "{{ (cloudflare_tunnel_ctx_query.json.result | selectattr('name', 'equalto', cloudflare_tunnel_ctx.name) | list | first) | default({}) }}"
+
+- name: "Adopt secret/id from Cloudflare when missing"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_secret: "{{ cloudflare_tunnel_ctx_existing.tunnel_secret | default(cloudflare_tunnel_ctx_secret) }}"
+    cloudflare_tunnel_ctx_id: "{{ cloudflare_tunnel_ctx_existing.id | default(cloudflare_tunnel_ctx_id) }}"
+  when: cloudflare_tunnel_ctx_existing | length > 0
+
+- name: "Ensure secret is known for existing tunnel"
+  ansible.builtin.assert:
+    that:
+      - cloudflare_tunnel_ctx_secret | default('') | length > 0
+    fail_msg: "Existing tunnel {{ cloudflare_tunnel_ctx.name }} lacks a secret. Keep the credentials file around or supply cloudflare_tunnel_credentials_json."
+  when: cloudflare_tunnel_ctx_existing | length > 0
+
+- name: "Generate secret for new tunnel"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_secret: "{{ lookup('community.general.random_string', length=64, special=false) | b64encode }}"
+  when:
+    - cloudflare_tunnel_ctx_existing | length == 0
+    - cloudflare_tunnel_ctx_secret | default('') | length == 0
+  no_log: true
+
+- name: "Create Cloudflare tunnel when absent"
+  ansible.builtin.uri:
+    url: "{{ cloudflare_tunnel_api_base_url }}/accounts/{{ cloudflare_tunnel_ctx.account_id }}/cfd_tunnel"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cloudflare_tunnel_ctx.api_token }}"
+      Content-Type: "application/json"
+      Accept: "application/json"
+    body_format: json
+    body:
+      name: "{{ cloudflare_tunnel_ctx.name }}"
+      tunnel_secret: "{{ cloudflare_tunnel_ctx_secret }}"
+      config_src: "local"
+    status_code: 200
+    timeout: "{{ cloudflare_tunnel_api_timeout }}"
+    validate_certs: yes
+  delegate_to: localhost
+  register: cloudflare_tunnel_ctx_create
+  no_log: true
+  when: cloudflare_tunnel_ctx_existing | length == 0
+
+- name: "Track created tunnel result"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_existing: "{{ cloudflare_tunnel_ctx_create.json.result | default({}, true) }}"
+  when: cloudflare_tunnel_ctx_create is defined
+
+- name: "Record tunnel identifiers"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_id: "{{ cloudflare_tunnel_ctx_existing.id | default(cloudflare_tunnel_ctx_id) }}"
+    cloudflare_tunnel_ctx_secret: "{{ cloudflare_tunnel_ctx_existing.tunnel_secret | default(cloudflare_tunnel_ctx_secret) }}"
+
+- name: "Ensure Cloudflare returned tunnel id/secret"
+  ansible.builtin.assert:
+    that:
+      - cloudflare_tunnel_ctx_id | length > 0
+      - cloudflare_tunnel_ctx_secret | length > 0
+    fail_msg: "Cloudflare did not return tunnel id/secret for {{ cloudflare_tunnel_ctx.name }}. Check API permissions."
+
+- name: "Attach tunnel id to context for templating"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx: "{{ cloudflare_tunnel_ctx | combine({'tunnel_id': cloudflare_tunnel_ctx_id}) }}"
+
+- name: "Render credentials JSON"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_credentials_rendered: >-
+      {{
+        {
+          'AccountTag': cloudflare_tunnel_ctx.account_id,
+          'TunnelSecret': cloudflare_tunnel_ctx_secret,
+          'TunnelID': cloudflare_tunnel_ctx_id,
+          'TunnelName': cloudflare_tunnel_ctx.name
+        }
+        | to_nice_json
+      }}
+  no_log: true
+
+- name: "Write Cloudflare tunnel credentials"
+  ansible.builtin.copy:
+    content: "{{ cloudflare_tunnel_ctx_credentials_rendered }}"
+    dest: "{{ cloudflare_tunnel_ctx.credentials_path }}"
+    owner: "{{ cloudflare_tunnel_ctx.service_user }}"
+    group: "{{ cloudflare_tunnel_ctx.service_group }}"
+    mode: "{{ cloudflare_tunnel_credentials_mode }}"
+  register: cloudflare_tunnel_ctx_credentials_written
+  become: yes
+  no_log: true
+
+- name: "Render Cloudflare tunnel config"
+  ansible.builtin.template:
+    src: "config.yml.j2"
+    dest: "{{ cloudflare_tunnel_ctx.config_path }}"
+    owner: "{{ cloudflare_tunnel_ctx.service_user }}"
+    group: "{{ cloudflare_tunnel_ctx.service_group }}"
+    mode: "{{ cloudflare_tunnel_config_mode }}"
+  vars:
+    cloudflare_tunnel_template_ctx: "{{ cloudflare_tunnel_ctx }}"
+  register: cloudflare_tunnel_ctx_config_rendered
+  become: yes
+
+- name: "Install systemd unit for tunnel"
+  ansible.builtin.template:
+    src: "cloudflared-tunnel.service.j2"
+    dest: "/etc/systemd/system/{{ cloudflare_tunnel_ctx.service_name }}.service"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  vars:
+    cloudflare_tunnel_template_ctx: "{{ cloudflare_tunnel_ctx }}"
+  register: cloudflare_tunnel_ctx_unit_rendered
+  become: yes
+
+- name: "Ensure Cloudflare tunnel service is enabled/started"
+  ansible.builtin.systemd:
+    name: "{{ cloudflare_tunnel_ctx.service_name }}"
+    enabled: "{{ cloudflare_tunnel_ctx.service_enabled }}"
+    state: "{{ cloudflare_tunnel_ctx.service_state }}"
+    daemon_reload: "{{ cloudflare_tunnel_ctx_unit_rendered.changed | bool }}"
+  become: yes
+
+- name: "Restart cloudflared tunnel when configuration changed"
+  ansible.builtin.systemd:
+    name: "{{ cloudflare_tunnel_ctx.service_name }}"
+    state: restarted
+  when:
+    - cloudflare_tunnel_ctx.service_state in ["started", "restarted"]
+    - cloudflare_tunnel_ctx_config_rendered.changed
+      or cloudflare_tunnel_ctx_credentials_written.changed
+      or cloudflare_tunnel_ctx_unit_rendered.changed
+  become: yes
+
+- name: "Poll Cloudflare tunnel health"
+  ansible.builtin.uri:
+    url: "{{ cloudflare_tunnel_api_base_url }}/accounts/{{ cloudflare_tunnel_ctx.account_id }}/cfd_tunnel/{{ cloudflare_tunnel_ctx_id }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cloudflare_tunnel_ctx.api_token }}"
+      Accept: "application/json"
+    return_content: yes
+    status_code: 200
+    validate_certs: yes
+    timeout: "{{ cloudflare_tunnel_api_timeout }}"
+  delegate_to: localhost
+  register: cloudflare_tunnel_ctx_health
+  retries: 8
+  delay: 5
+  until: >
+    (cloudflare_tunnel_ctx_health.json.result.status | default('')) == 'healthy'
+    and (cloudflare_tunnel_ctx_health.json.result.connections | default([]) | length) > 0
+  failed_when: false
+  changed_when: false
+  ignore_errors: true
+  no_log: true
+  when: cloudflare_tunnel_ctx.service_state in ["started", "restarted"]
+
+- name: "Fail if tunnel failed to become healthy"
+  ansible.builtin.fail:
+    msg: >-
+      Cloudflare tunnel {{ cloudflare_tunnel_ctx.name }} stayed
+      {{ cloudflare_tunnel_ctx_health.json.result.status | default(cloudflare_tunnel_ctx_health.msg | default('unknown')) }}
+      with {{ (cloudflare_tunnel_ctx_health.json.result.connections | default([]) | length) }} active connections after
+      polling the API. Check systemd logs on {{ inventory_hostname }} for cloudflared errors.
+  when:
+    - cloudflare_tunnel_ctx.service_state in ["started", "restarted"]
+    - cloudflare_tunnel_ctx_health is not defined
+      or (cloudflare_tunnel_ctx_health.json.result.status | default('') != 'healthy')
+      or ((cloudflare_tunnel_ctx_health.json.result.connections | default([]) | length) == 0)
+
+- name: "Collect ingress hostnames"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_ingress_hostnames: "{{ cloudflare_tunnel_ctx.ingress | selectattr('hostname', 'defined') | list }}"
+
+- name: "Ensure DNS record for each ingress hostname"
+  ansible.builtin.include_tasks: dns_record.yml
+  vars:
+    cloudflare_tunnel_dns_item: "{{ cloudflare_tunnel_dns_item }}"
+  when:
+    - cloudflare_tunnel_ctx.manage_dns | bool
+    - cloudflare_tunnel_ctx_ingress_hostnames | length > 0
+    - cloudflare_tunnel_ctx_health is not defined
+      or (cloudflare_tunnel_ctx_health.json.result.status | default('') == 'healthy')
+  loop: "{{ cloudflare_tunnel_ctx_ingress_hostnames }}"
+  loop_control:
+    loop_var: cloudflare_tunnel_dns_item
+    label: "{{ cloudflare_tunnel_dns_item.hostname }}"

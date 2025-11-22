@@ -1,0 +1,116 @@
+---
+- name: "Derive zone name and prepare hostname"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_dns_hostname: "{{ cloudflare_tunnel_dns_item.hostname }}"
+    cloudflare_tunnel_ctx_dns_zone_name: >-
+      {{
+        cloudflare_tunnel_dns_item.zone_name
+        | default(cloudflare_tunnel_ctx.zone_name)
+        | default((cloudflare_tunnel_dns_item.hostname.split('.', 1)[1]) if ('.' in cloudflare_tunnel_dns_item.hostname) else '', true)
+      }}
+
+- name: "Assert zone name is known"
+  ansible.builtin.assert:
+    that:
+      - cloudflare_tunnel_ctx_dns_zone_name | length > 0
+    fail_msg: "Could not determine zone name for hostname {{ cloudflare_tunnel_ctx_dns_hostname }}."
+
+- name: "Lookup zone id (cached)"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_zone_id: "{{ cloudflare_tunnel_dns_zone_cache[cloudflare_tunnel_ctx_dns_zone_name] }}"
+  when: cloudflare_tunnel_ctx_dns_zone_name in cloudflare_tunnel_dns_zone_cache
+
+- name: "Query Cloudflare for zone id"
+  ansible.builtin.uri:
+    url: "{{ cloudflare_tunnel_api_base_url }}/zones?name={{ cloudflare_tunnel_ctx_dns_zone_name | urlencode }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cloudflare_tunnel_ctx.api_token }}"
+      Accept: "application/json"
+    return_content: yes
+    status_code: 200
+    validate_certs: yes
+    timeout: "{{ cloudflare_tunnel_api_timeout }}"
+  delegate_to: localhost
+  register: cloudflare_tunnel_ctx_zone_query
+  when: cloudflare_tunnel_ctx_dns_zone_name not in cloudflare_tunnel_dns_zone_cache
+  no_log: true
+
+- name: "Cache looked-up zone id"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_zone_id: "{{ (cloudflare_tunnel_ctx_zone_query.json.result | first).id | default('') }}"
+    cloudflare_tunnel_dns_zone_cache: "{{ cloudflare_tunnel_dns_zone_cache | combine({cloudflare_tunnel_ctx_dns_zone_name: ((cloudflare_tunnel_ctx_zone_query.json.result | first).id | default(''))}) }}"
+  when: cloudflare_tunnel_ctx_dns_zone_name not in cloudflare_tunnel_dns_zone_cache
+  no_log: true
+
+- name: "Assert zone id is known"
+  ansible.builtin.assert:
+    that:
+      - cloudflare_tunnel_ctx_zone_id | length > 0
+    fail_msg: "Could not resolve zone id for {{ cloudflare_tunnel_ctx_dns_zone_name }} (hostname {{ cloudflare_tunnel_ctx_dns_hostname }})."
+
+- name: "Find existing DNS record"
+  ansible.builtin.uri:
+    url: "{{ cloudflare_tunnel_api_base_url }}/zones/{{ cloudflare_tunnel_ctx_zone_id }}/dns_records?type=CNAME&name={{ cloudflare_tunnel_ctx_dns_hostname | urlencode }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cloudflare_tunnel_ctx.api_token }}"
+      Accept: "application/json"
+    return_content: yes
+    status_code: 200
+    validate_certs: yes
+    timeout: "{{ cloudflare_tunnel_api_timeout }}"
+  delegate_to: localhost
+  register: cloudflare_tunnel_ctx_dns_query
+  no_log: true
+
+- name: "Set DNS record facts"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx_dns_existing: "{{ cloudflare_tunnel_ctx_dns_query.json.result | selectattr('name', 'equalto', cloudflare_tunnel_ctx_dns_hostname) | list | first | default({}) }}"
+    cloudflare_tunnel_ctx_dns_target: "{{ cloudflare_tunnel_ctx_id }}.cfargotunnel.com"
+  no_log: true
+
+- name: "Update DNS record when needed"
+  ansible.builtin.uri:
+    url: "{{ cloudflare_tunnel_api_base_url }}/zones/{{ cloudflare_tunnel_ctx_zone_id }}/dns_records/{{ cloudflare_tunnel_ctx_dns_existing.id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ cloudflare_tunnel_ctx.api_token }}"
+      Content-Type: "application/json"
+      Accept: "application/json"
+    body_format: json
+    body:
+      type: "CNAME"
+      name: "{{ cloudflare_tunnel_ctx_dns_hostname }}"
+      content: "{{ cloudflare_tunnel_ctx_dns_target }}"
+      proxied: "{{ cloudflare_tunnel_ctx.dns_proxied }}"
+    status_code: 200
+    validate_certs: yes
+    timeout: "{{ cloudflare_tunnel_api_timeout }}"
+  delegate_to: localhost
+  when:
+    - cloudflare_tunnel_ctx_dns_existing | length > 0
+    - cloudflare_tunnel_ctx_dns_existing.content | default('') != cloudflare_tunnel_ctx_dns_target
+      or (cloudflare_tunnel_ctx_dns_existing.proxied | default(false) | bool) != (cloudflare_tunnel_ctx.dns_proxied | bool)
+  no_log: true
+
+- name: "Create DNS record when missing"
+  ansible.builtin.uri:
+    url: "{{ cloudflare_tunnel_api_base_url }}/zones/{{ cloudflare_tunnel_ctx_zone_id }}/dns_records"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cloudflare_tunnel_ctx.api_token }}"
+      Content-Type: "application/json"
+      Accept: "application/json"
+    body_format: json
+    body:
+      type: "CNAME"
+      name: "{{ cloudflare_tunnel_ctx_dns_hostname }}"
+      content: "{{ cloudflare_tunnel_ctx_dns_target }}"
+      proxied: "{{ cloudflare_tunnel_ctx.dns_proxied }}"
+    status_code: 200
+    validate_certs: yes
+    timeout: "{{ cloudflare_tunnel_api_timeout }}"
+  delegate_to: localhost
+  when: cloudflare_tunnel_ctx_dns_existing | length == 0
+  no_log: true

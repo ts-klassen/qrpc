@@ -26,6 +26,12 @@ cloudflare_dns_records:
     proxied: false
     ttl: 300
 
+
+# Cloudflare Tunnel management (optional). Define the control-plane API token
+# here (vault it!) and list per-host tunnels under host_vars/<hostname>.yml.
+# See host_vars/qrpc-app01.example.com.yml for a worked example.
+cloudflare_tunnel_account_id: "11111111aaaa2222bbbb3333cccc4444"
+
 # qrpc backups (required). Use Ansible Vault for any real secrets.
 qrpc_backup_s3_bucket: "qrpc-backups-example"
 qrpc_backup_s3_prefix: "env/example/{{ inventory_hostname }}"

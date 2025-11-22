@@ -1,0 +1,17 @@
+[Unit]
+Description=Cloudflare Tunnel ({{ cloudflare_tunnel_template_ctx.name }})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ cloudflare_tunnel_template_ctx.service_user }}
+Group={{ cloudflare_tunnel_template_ctx.service_group }}
+ExecStart={{ cloudflare_tunnel_template_ctx.bin_path }} --no-autoupdate --config {{ cloudflare_tunnel_template_ctx.config_path }} tunnel run {{ cloudflare_tunnel_template_ctx.tunnel_id | default(cloudflare_tunnel_template_ctx.id | default(cloudflare_tunnel_template_ctx.name)) }}{% if cloudflare_tunnel_template_ctx.service_extra_args | length > 0 %} {{ cloudflare_tunnel_template_ctx.service_extra_args | join(' ') }}{% endif %}
+Restart=always
+RestartSec=5s
+KillMode=process
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

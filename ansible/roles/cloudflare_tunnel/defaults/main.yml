@@ -1,0 +1,56 @@
+---
+# Default settings for deploying Cloudflare Tunnels with cloudflared
+
+# Shared API settings. Individual tunnels can override account_id or token.
+cloudflare_api_token: ""
+cloudflare_tunnel_account_id: ""
+cloudflare_tunnel_credentials_json: ""
+cloudflare_tunnel_api_base_url: "https://api.cloudflare.com/client/v4"
+cloudflare_tunnel_api_timeout: 30
+
+# List of tunnel definitions applied to the target host.
+# Each entry may override any of the per-tunnel options documented below.
+cloudflare_tunnels: []
+
+# Whether this role should configure the official Cloudflare apt repository.
+cloudflare_tunnel_manage_repo: true
+
+# Repository details (only used when manage_repo == true).
+cloudflare_tunnel_repo_key_url: "https://pkg.cloudflare.com/cloudflare-public-v2.gpg"
+cloudflare_tunnel_repo_key_path: "/usr/share/keyrings/cloudflare-public-v2.gpg"
+cloudflare_tunnel_repo_url: "https://pkg.cloudflare.com/cloudflared"
+cloudflare_tunnel_repo_list_filename: "cloudflare-client"
+# Leave empty to auto-detect from the host distro codename (e.g., noble, jammy).
+# Cloudflare recommends using "any" for their tunnel repo, so that's the default.
+cloudflare_tunnel_repo_codename: "any"
+
+# Package installation preferences.
+cloudflare_tunnel_package_name: "cloudflared"
+cloudflare_tunnel_package_state: "latest"
+
+# File-system defaults.
+cloudflare_tunnel_config_dir: "/etc/cloudflared"
+cloudflare_tunnel_config_mode: "0600"
+cloudflare_tunnel_credentials_mode: "0600"
+
+# DNS management (optional).
+cloudflare_tunnel_manage_dns: true
+cloudflare_tunnel_dns_proxied: true
+cloudflare_tunnel_zone_name: ""
+cloudflare_tunnel_zone_id: ""
+
+# Config tuning knobs exposed as defaults (overridable per tunnel).
+cloudflare_tunnel_fallback_service: "http_status:404"
+cloudflare_tunnel_metrics_endpoint: ""
+cloudflare_tunnel_origin_request: {}
+cloudflare_tunnel_warp_routing: {}
+cloudflare_tunnel_extra_config: {}
+
+# Systemd service defaults (overridable per tunnel via service_name/user/group/extra_args/etc.).
+cloudflare_tunnel_service_prefix: "cloudflared-"
+cloudflare_tunnel_service_user: "root"
+cloudflare_tunnel_service_group: "root"
+cloudflare_tunnel_bin_path: "/usr/bin/cloudflared"
+cloudflare_tunnel_service_extra_args: []
+cloudflare_tunnel_service_enabled: true
+cloudflare_tunnel_service_state: "started"

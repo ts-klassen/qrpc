@@ -16,6 +16,10 @@ Overview
 - **Role:** `roles/qrpc_backup/` configures duplicity-based backups for
   `/opt/qrpc`. It drops a wrapper script, credentials env file, and a
   `qrpc-backup.service`/`.timer` pair so backups run automatically.
+- **Role:** `roles/cloudflare_tunnel/` installs Cloudflare's `cloudflared`
+  connector on a host, creates/updates one or more tunnels via the Cloudflare
+  API, writes each tunnel's credentials/config, and manages dedicated systemd
+  units that keep them online.
 - **Examples:** `env/example/` contains an inventory, vars, host-specific config
   files, and `playbook.yml`. Everything under `env/real/` is ignored by git so
   you can mirror the structure privately.
@@ -112,3 +116,22 @@ Cloudflare DNS
 - Define `cloudflare_dns_records` and `cloudflare_api_token` in your private copy of `group_vars/all.yml` (or another vars file) following the example structure in `ansible/env/example/group_vars/all.yml`. Keep that file under Ansible Vault so the token stays encrypted.
 - Run it from the repo root whenever you need to sync DNS:
   `/opt/qrpc/pkg/bin/ansible-playbook -i ansible/env/real/inventory.yml ansible/playbooks/cloudflare_dns.yml`
+
+Cloudflare Tunnels
+------------------
+
+- `roles/cloudflare_tunnel/` installs the official Cloudflare apt repo (optional), ensures the `cloudflared` package is present, writes your tunnel credentials/config under `/etc/cloudflared`, and registers a dedicated systemd service that runs `cloudflared tunnel run <name>`.
+- Provide `cloudflare_api_token` with the Cloudflare Tunnel edit scope, `cloudflare_tunnel_account_id`, and define `cloudflare_tunnels` in each host's vars. Every entry needs a `name` and at least one `ingress` rule; everything else—metrics endpoint, fallback service, warp-routing, origin request knobs, config/service paths, etc.—is overridable per entry.
+- Example host-vars snippet:
+
+  ```yaml
+  cloudflare_tunnels:
+    - name: qrpc-app01
+      ingress:
+        - hostname: app01.example.net
+          service: http://127.0.0.1:8000
+  ```
+- On every run the role talks to the Cloudflare API: it ensures the tunnel exists, generates or reuses the secret, renders the credentials JSON locally, templates `/etc/cloudflared/*.yml`, and keeps `cloudflared-<name>.service` enabled.
+- Deploy it per host with:
+  `/opt/qrpc/pkg/bin/ansible-playbook -i ansible/env/real/inventory.yml ansible/playbooks/cloudflare_tunnel.yml -e cloudflare_tunnel_target_host=<fqdn>`
+- Optional knobs cover metrics endpoints, fallback ingress rules, warp-routing, extra CLI flags, or custom config/credential paths. Check `ansible/env/example/host_vars/qrpc-app01.example.com.yml` for a starter snippet.

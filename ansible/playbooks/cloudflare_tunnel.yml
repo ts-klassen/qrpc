@@ -1,0 +1,8 @@
+---
+# Deploy one or more Cloudflare tunnels to a specific host.
+# Always pass `-e cloudflare_tunnel_target_host=<fqdn>` when running it.
+- name: Deploy Cloudflare tunnels
+  hosts: "{{ cloudflare_tunnel_target_host }}"
+  become: yes
+  roles:
+    - cloudflare_tunnel
