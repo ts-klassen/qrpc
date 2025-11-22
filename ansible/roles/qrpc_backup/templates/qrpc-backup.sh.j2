@@ -1,0 +1,97 @@
+#!/bin/bash
+#
+# Managed by Ansible - runs duplicity backups for /opt/qrpc and logs via cronolog.
+
+set -Eeuo pipefail
+
+CRONOLOG_BIN="{{ qrpc_backup_cronolog_path }}"
+LOG_DIR="{{ qrpc_backup_log_dir }}"
+LOG_STREAM="{{ qrpc_backup_log_dir }}/{{ qrpc_backup_log_pattern }}"
+
+log() {
+  printf '%s %s\n' "$(date --iso-8601=seconds)" "$*"
+}
+
+cleanup() {
+  if [[ -n "${LOCK_FD:-}" ]]; then
+    flock -u "$LOCK_FD" || true
+  fi
+}
+
+on_error() {
+  log "Backup failed (line $1)"
+}
+trap 'on_error ${LINENO}' ERR
+trap cleanup EXIT
+
+if [[ ! -x "$CRONOLOG_BIN" ]]; then
+  printf 'Cronolog binary not executable at %s\n' "$CRONOLOG_BIN" >&2
+  exit 1
+fi
+
+mkdir -p "$LOG_DIR"
+exec > >("$CRONOLOG_BIN" "$LOG_STREAM")
+exec 2>&1
+
+SOURCE="{{ qrpc_backup_source_path }}"
+TARGET="{{ qrpc_backup_target_url }}"
+DUPLICITY_BIN="{{ qrpc_backup_duplicity_path }}"
+ARCHIVE_DIR="{{ qrpc_backup_archive_dir }}"
+TEMP_DIR="{{ qrpc_backup_temp_dir }}"
+LOCK_FILE="{{ qrpc_backup_lock_file }}"
+
+if [[ ! -x "$DUPLICITY_BIN" ]]; then
+  log "Duplicity binary not executable at $DUPLICITY_BIN"
+  exit 1
+fi
+
+if [[ ! -d "$SOURCE" ]]; then
+  log "Source directory $SOURCE does not exist"
+  exit 1
+fi
+
+if [[ -z "${TARGET:-}" ]]; then
+  log "Target URL is empty"
+  exit 1
+fi
+
+umask 027
+mkdir -p "$ARCHIVE_DIR" "$TEMP_DIR"
+
+exec {LOCK_FD}>"$LOCK_FILE"
+if ! flock -n "$LOCK_FD"; then
+  log "Another qrpc backup run is already in progress, skipping."
+  exit 0
+fi
+
+BASE_ARGS=( "--name" "{{ qrpc_backup_name }}" "--archive-dir" "$ARCHIVE_DIR" )
+BACKUP_ARGS=( "--full-if-older-than" "{{ qrpc_backup_full_if_older_than }}" "--volsize" "{{ qrpc_backup_volsize_mb }}" "--tempdir" "$TEMP_DIR" )
+
+EXCLUDE_ARGS=()
+{% for path in qrpc_backup_exclude_paths %}
+EXCLUDE_ARGS+=( "--exclude" "{{ path }}" )
+{% endfor %}
+
+EXTRA_ARGS=()
+{% for opt in qrpc_backup_extra_options %}
+EXTRA_ARGS+=( "{{ opt }}" )
+{% endfor %}
+
+log "Starting duplicity backup of ${SOURCE} -> ${TARGET}"
+"$DUPLICITY_BIN" \
+  "${BASE_ARGS[@]}" \
+  "${BACKUP_ARGS[@]}" \
+  "${EXCLUDE_ARGS[@]}" \
+  "${EXTRA_ARGS[@]}" \
+  "$SOURCE" \
+  "$TARGET"
+
+log "Pruning backups older than {{ qrpc_backup_retention }}"
+"$DUPLICITY_BIN" \
+  "${BASE_ARGS[@]}" \
+  "${EXTRA_ARGS[@]}" \
+  remove-older-than "{{ qrpc_backup_retention }}" \
+  --force \
+  "$TARGET"
+
+log "qrpc duplicity backup complete"

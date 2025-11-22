@@ -13,6 +13,9 @@ Overview
   packages, uploads or downloads the release tarball built by `./Build package`,
   runs `install.sh`, copies your Erlang config to `/opt/qrpc/etc/qrpc/qrpc.config`,
   and restarts the service.
+- **Role:** `roles/qrpc_backup/` configures duplicity-based backups for
+  `/opt/qrpc`. It drops a wrapper script, credentials env file, and a
+  `qrpc-backup.service`/`.timer` pair so backups run automatically.
 - **Examples:** `env/example/` contains an inventory, vars, host-specific config
   files, and `playbook.yml`. Everything under `env/real/` is ignored by git so
   you can mirror the structure privately.
@@ -42,6 +45,9 @@ Files you should customize
   source type, and the path to your tarball. The role exposes `qrpc_repo_root`,
   so the default `qrpc_source_path` already points at
   `_release_packages/qrpc-<version>-<arch>.tar.gz` relative to the repo root.
+  This playbook always runs the `qrpc_backup` role, so set
+  `qrpc_backup_s3_bucket` and related credentials/endpoint variables before
+  deploying or the run will stop at the role's variable assertions.
 - `host_vars/<hostname>.yml` – per-host overrides, most importantly
   `qrpc_config_source`. Point it at a file that lives next to your inventory,
   e.g. `qrpc_config_source: "{{ inventory_dir }}/configs/<fqdn>.config"`.
@@ -51,6 +57,41 @@ Files you should customize
   on every run, ensuring you never deploy without naming the exact host. Add
   more playbooks under `ansible/playbooks/` (database, all-in-one, etc.) as
   needed.
+
+Backups
+-------
+
+- Configure the bundled duplicity automation by defining
+  `qrpc_backup_s3_bucket` (and optionally `qrpc_backup_s3_prefix`) in your
+  private `group_vars/all.yml` before applying the `qrpc_backup` role. The
+  default `ansible/playbooks/qrpc.yml` play always includes this role and will
+  fail fast if the bucket/target information is missing, ensuring the deployment
+  never runs without backups configured.
+- Point the role at a non-AWS or mock endpoint by setting
+  `qrpc_backup_s3_endpoint` (for example `s3+https://s3.internal.example`). The
+  computed target becomes `<endpoint>/<bucket>/<prefix>`, keeping the bucket in
+  the path (no `bucket.endpoint` hostnames).
+- Store AWS credentials, GPG passphrases, or any sensitive overrides under
+  Ansible Vault (`qrpc_backup_aws_access_key_id`,
+  `qrpc_backup_aws_secret_access_key`, `qrpc_backup_gpg_passphrase`). You can
+  omit them entirely when the host uses an IAM role.
+- All helper assets stay under `/opt/qrpc`: the env file lives at
+  `/opt/qrpc/etc/qrpc-backup/backup.env`, the runner script at
+  `/opt/qrpc/bin/qrpc-backup`, and duplicity metadata under
+  `/opt/qrpc/var/lib/qrpc-backup` (with temp/lock directories alongside). Only
+  the systemd unit/timer are placed in `/etc/systemd/system`.
+- Runtime output is streamed through cronolog into
+  `/opt/qrpc/var/log/qrpc-backup/%Y%m/%d-%H.log`, satisfying the repo-wide
+  logging convention without relying on journald.
+- The role registers
+  `qrpc-backup.service`/`qrpc-backup.timer`. The timer defaults to `OnCalendar=daily`
+  with a randomized delay; override `qrpc_backup_timer_oncalendar`,
+  `qrpc_backup_timer_randomized_delay`, or exclude paths via
+  `qrpc_backup_exclude_paths` as needed.
+- Duplicity cache/metadata staying in `/opt/qrpc/var/lib/qrpc-backup` means the
+  timer will continue incremental runs even if the host reboots. Retention
+  defaults to 90 days (`qrpc_backup_retention`) and is enforced after every
+  backup run.
 
 Working with real data
 ----------------------

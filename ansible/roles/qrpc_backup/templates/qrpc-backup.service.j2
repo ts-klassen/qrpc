@@ -1,0 +1,25 @@
+[Unit]
+Description=qrpc duplicity backup
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor={{ qrpc_backup_source_path }}
+RequiresMountsFor={{ qrpc_backup_script_path | dirname }}
+RequiresMountsFor={{ qrpc_backup_env_dir }}
+RequiresMountsFor={{ qrpc_backup_log_dir }}
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+EnvironmentFile=-{{ qrpc_backup_env_file }}
+ExecStart={{ qrpc_backup_script_path }}
+WorkingDirectory={{ qrpc_backup_root_dir }}
+Nice={{ qrpc_backup_nice_level }}
+IOSchedulingClass={{ qrpc_backup_ioscheduling_class }}
+IOSchedulingPriority={{ qrpc_backup_ioscheduling_priority }}
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

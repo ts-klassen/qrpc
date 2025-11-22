@@ -1,0 +1,6 @@
+---
+- name: "Restart qrpc backup timer"
+  become: yes
+  ansible.builtin.systemd:
+    name: "{{ qrpc_backup_systemd_timer }}"
+    state: restarted

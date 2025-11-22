@@ -1,0 +1,14 @@
+[Unit]
+Description=Schedule qrpc duplicity backups
+
+[Timer]
+OnCalendar={{ qrpc_backup_timer_oncalendar }}
+RandomizedDelaySec={{ qrpc_backup_timer_randomized_delay }}
+AccuracySec={{ qrpc_backup_timer_accuracy }}
+{% if qrpc_backup_timer_persistent %}
+Persistent=true
+{% endif %}
+Unit={{ qrpc_backup_systemd_service }}
+
+[Install]
+WantedBy=timers.target

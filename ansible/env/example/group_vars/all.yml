@@ -25,3 +25,13 @@ cloudflare_dns_records:
     content: "203.0.113.10"
     proxied: false
     ttl: 300
+
+# qrpc backups (required). Use Ansible Vault for any real secrets.
+qrpc_backup_s3_bucket: "qrpc-backups-example"
+qrpc_backup_s3_prefix: "env/example/{{ inventory_hostname }}"
+qrpc_backup_s3_endpoint: "s3+https://s3-compatible.example.net"
+qrpc_backup_aws_access_key_id: "REPLACE_WITH_VAULTED_VALUE"
+qrpc_backup_aws_secret_access_key: "REPLACE_WITH_VAULTED_VALUE"
+qrpc_backup_aws_region: "us-east-1"
+qrpc_backup_gpg_passphrase: "REPLACE_WITH_REAL_SECRET"
+qrpc_backup_timer_oncalendar: "daily"

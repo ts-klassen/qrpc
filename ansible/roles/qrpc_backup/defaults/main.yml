@@ -1,0 +1,64 @@
+---
+# Default settings for qrpc duplicity backups
+
+# What to backup and which duplicity binary to use.
+qrpc_backup_source_path: "/opt/qrpc"
+qrpc_backup_duplicity_path: "/opt/qrpc/pkg/bin/duplicity"
+qrpc_backup_root_dir: "/opt/qrpc"
+qrpc_backup_cronolog_path: "/opt/qrpc/pkg/sbin/cronolog"
+
+# S3 destination details. Bucket is required whenever the backup role runs.
+qrpc_backup_s3_bucket: ""
+qrpc_backup_s3_prefix: "qrpc/{{ inventory_hostname }}"
+qrpc_backup_s3_endpoint: ""
+
+# Derived duplicity target URL (auto-computed from bucket/prefix/endpoint).
+qrpc_backup_target_url: >-
+  {% if qrpc_backup_s3_endpoint | length > 0 -%}
+  {{ qrpc_backup_s3_endpoint | trim('/') }}/{{ qrpc_backup_s3_bucket }}{% if qrpc_backup_s3_prefix | length > 0 %}/{{ qrpc_backup_s3_prefix | trim('/') }}{% endif %}
+  {%- else -%}
+  s3://{{ qrpc_backup_s3_bucket }}{% if qrpc_backup_s3_prefix | length > 0 %}/{{ qrpc_backup_s3_prefix | trim('/') }}{% endif %}
+  {%- endif %}
+
+# AWS credentials/region (leave blank when using an IAM role).
+qrpc_backup_aws_access_key_id: ""
+qrpc_backup_aws_secret_access_key: ""
+qrpc_backup_aws_region: ""
+
+# Optional GPG passphrase for duplicity encryption (store via Ansible Vault).
+qrpc_backup_gpg_passphrase: ""
+
+# Extra key/value pairs to append to the environment file.
+qrpc_backup_env_extras: {}
+
+# Duplicity behavior tuning.
+qrpc_backup_name: "qrpc"
+qrpc_backup_full_if_older_than: "30D"
+qrpc_backup_retention: "90D"
+qrpc_backup_volsize_mb: 250
+qrpc_backup_exclude_paths: []
+qrpc_backup_extra_options: []
+
+# Local filesystem layout for logs, state, archives, temp files, and helpers.
+qrpc_backup_log_dir: "{{ qrpc_backup_root_dir }}/var/log/qrpc-backup"
+qrpc_backup_log_pattern: "%Y%m/%d-%H.log"
+qrpc_backup_state_dir: "{{ qrpc_backup_root_dir }}/var/lib/qrpc-backup"
+qrpc_backup_archive_dir: "{{ qrpc_backup_state_dir }}/archive"
+qrpc_backup_temp_dir: "{{ qrpc_backup_root_dir }}/var/tmp/qrpc-backup"
+qrpc_backup_lock_file: "{{ qrpc_backup_root_dir }}/var/lock/qrpc-backup.lock"
+qrpc_backup_env_dir: "{{ qrpc_backup_root_dir }}/etc/qrpc-backup"
+qrpc_backup_env_file: "{{ qrpc_backup_env_dir }}/backup.env"
+qrpc_backup_script_path: "{{ qrpc_backup_root_dir }}/bin/qrpc-backup"
+
+# Systemd unit/timer names and scheduling.
+qrpc_backup_systemd_service: "qrpc-backup.service"
+qrpc_backup_systemd_timer: "qrpc-backup.timer"
+qrpc_backup_timer_oncalendar: "daily"
+qrpc_backup_timer_randomized_delay: "15m"
+qrpc_backup_timer_accuracy: "1m"
+qrpc_backup_timer_persistent: true
+
+# Service scheduling niceness (tune to reduce impact on busy hosts).
+qrpc_backup_nice_level: 10
+qrpc_backup_ioscheduling_class: 2
+qrpc_backup_ioscheduling_priority: 4

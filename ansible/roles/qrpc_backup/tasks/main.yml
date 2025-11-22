@@ -1,0 +1,91 @@
+- name: "Configure duplicity backup for /opt/qrpc"
+  become: yes
+  block:
+    - name: "Assert required qrpc backup settings are present"
+      ansible.builtin.assert:
+        that:
+          - qrpc_backup_s3_bucket | length > 0
+          - qrpc_backup_source_path | length > 0
+          - qrpc_backup_target_url | length > 0
+        fail_msg: "Set qrpc_backup_s3_bucket/source/target variables before configuring backups."
+
+    - name: "Check duplicity binary path"
+      ansible.builtin.stat:
+        path: "{{ qrpc_backup_duplicity_path }}"
+      register: qrpc_backup_duplicity_stat
+
+    - name: "Fail when duplicity binary is missing"
+      ansible.builtin.fail:
+        msg: "Duplicity binary not found at {{ qrpc_backup_duplicity_path }} (expected from packaged qrpc runtime)."
+      when: not qrpc_backup_duplicity_stat.stat.exists
+
+    - name: "Check cronolog binary path"
+      ansible.builtin.stat:
+        path: "{{ qrpc_backup_cronolog_path }}"
+      register: qrpc_backup_cronolog_stat
+
+    - name: "Fail when cronolog binary is missing"
+      ansible.builtin.fail:
+        msg: "Cronolog binary not found at {{ qrpc_backup_cronolog_path }} (qrpc packaging expected to supply it)."
+      when: not qrpc_backup_cronolog_stat.stat.exists
+
+    - name: "Create qrpc backup directories"
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ qrpc_backup_root_dir }}", mode: "0755" }
+        - { path: "{{ qrpc_backup_log_dir }}", mode: "0755" }
+        - { path: "{{ qrpc_backup_state_dir }}", mode: "0700" }
+        - { path: "{{ qrpc_backup_archive_dir }}", mode: "0700" }
+        - { path: "{{ qrpc_backup_temp_dir }}", mode: "0700" }
+        - { path: "{{ qrpc_backup_env_dir }}", mode: "0700" }
+        - { path: "{{ qrpc_backup_script_path | dirname }}", mode: "0755" }
+        - { path: "{{ qrpc_backup_lock_file | dirname }}", mode: "0700" }
+
+    - name: "Install qrpc backup environment file"
+      ansible.builtin.template:
+        src: "qrpc-backup.env.j2"
+        dest: "{{ qrpc_backup_env_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: "Install qrpc backup script"
+      ansible.builtin.template:
+        src: "qrpc-backup.sh.j2"
+        dest: "{{ qrpc_backup_script_path }}"
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: "Install qrpc backup systemd service"
+      ansible.builtin.template:
+        src: "qrpc-backup.service.j2"
+        dest: "/etc/systemd/system/{{ qrpc_backup_systemd_service }}"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: "Restart qrpc backup timer"
+
+    - name: "Install qrpc backup systemd timer"
+      ansible.builtin.template:
+        src: "qrpc-backup.timer.j2"
+        dest: "/etc/systemd/system/{{ qrpc_backup_systemd_timer }}"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: "Restart qrpc backup timer"
+
+    - name: "Reload systemd to pick up qrpc backup units"
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    - name: "Ensure qrpc backup timer is enabled"
+      ansible.builtin.systemd:
+        name: "{{ qrpc_backup_systemd_timer }}"
+        enabled: yes
+        state: started
