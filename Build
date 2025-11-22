@@ -18,6 +18,7 @@ case "$1" in
     sudo patch _root/root/pkgsrc/mk/defaults/mk.conf < config/mk.conf.patch
     sudo bash -c 'echo >> _root/etc/bash.bashrc'
     sudo bash -c 'echo '"'"'export PATH=/opt/qrpc/pkg/bin:$PATH'"'"' >> _root/etc/bash.bashrc'
+    sudo bash -c 'echo '"'"'export PATH=/opt/qrpc/pkg/sbin:$PATH'"'"' >> _root/etc/bash.bashrc'
     sudo bash -c 'echo '"'"'export MANPATH=/opt/qrpc/pkg/man:$MANPATH'"'"' >> _root/etc/bash.bashrc'
     sudo chroot _root /usr/bin/apt-get update
     sudo chroot _root /usr/bin/apt-get install -y gcc g++ wget

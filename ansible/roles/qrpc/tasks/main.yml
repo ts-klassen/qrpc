@@ -62,6 +62,20 @@
     remote_src: yes
   become: yes
 
+# Temporary workaround for Ubuntu 22.04-built package expecting libunistring.so.2
+- name: "Check for libunistring.so.2"
+  ansible.builtin.stat:
+    path: /lib/x86_64-linux-gnu/libunistring.so.2
+  register: qrpc_libunistring_so2_stat
+
+- name: "Create temporary libunistring.so.2 symlink to libunistring.so.5 (Ubuntu 22.04 artifact workaround)"
+  ansible.builtin.file:
+    src: /lib/x86_64-linux-gnu/libunistring.so.5
+    dest: /lib/x86_64-linux-gnu/libunistring.so.2
+    state: link
+  when: not qrpc_libunistring_so2_stat.stat.exists
+  become: yes
+
 - name: "Run qrpc install script (always)"
   ansible.builtin.command: "./install.sh"
   args:
