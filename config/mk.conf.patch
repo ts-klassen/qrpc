@@ -25,7 +25,15 @@
  # This is the config directory under which system configuration files are
  # expected.
  # Possible: any path you like
-@@ -1349,7 +1349,7 @@ LEAFNODE_GROUP?=	news
+@@ -570,6 +570,7 @@ PATCH_FUZZ_FACTOR?= -F0
+ # ===>     ACCEPTABLE_LICENSES+=xv-license
+ #
+ # Default: none
++ACCEPTABLE_LICENSES+= mit-krb5-license
+ 
+ #SPECIFIC_PKGS= yes
+ #
+@@ -1349,7 +1350,7 @@ LEAFNODE_GROUP?=	news
  # Possible: c rust
  # Default: rust on operating systems supported by lang/rust
  
