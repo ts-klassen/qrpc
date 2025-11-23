@@ -41,3 +41,13 @@ qrpc_backup_aws_secret_access_key: "REPLACE_WITH_VAULTED_VALUE"
 qrpc_backup_aws_region: "us-east-1"
 qrpc_backup_gpg_passphrase: "REPLACE_WITH_REAL_SECRET"
 qrpc_backup_timer_oncalendar: "daily"
+
+# WebArena Indigo API settings (used by ansible/playbooks/webarena_indigo.yml).
+# Define these in your private env and vault secrets as needed.
+# webarena_indigo_client_id: "REPLACE_WITH_INDIGO_CLIENT_ID"
+# webarena_indigo_client_secret: "REPLACE_WITH_INDIGO_CLIENT_SECRET"
+# webarena_indigo_ssh_key_id: "12345"
+# webarena_indigo_region_id: "1"
+# webarena_indigo_os_id: "1"
+# webarena_indigo_plan_id: "1"
+# webarena_indigo_instance_name: "qrpc-indigo-demo"

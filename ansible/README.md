@@ -20,6 +20,9 @@ Overview
   connector on a host, creates/updates one or more tunnels via the Cloudflare
   API, writes each tunnel's credentials/config, and manages dedicated systemd
   units that keep them online.
+- **Role:** `roles/webarena_indigo/` talks to the Indigo API from the control
+  node to create a WebArena Indigo VM, start it, and print the assigned IP
+  information.
 - **Examples:** `env/example/` contains an inventory, vars, host-specific config
   files, and `playbook.yml`. Everything under `env/real/` is ignored by git so
   you can mirror the structure privately.
@@ -135,3 +138,11 @@ Cloudflare Tunnels
 - Deploy it per host with:
   `/opt/qrpc/pkg/bin/ansible-playbook -i ansible/env/real/inventory.yml ansible/playbooks/cloudflare_tunnel.yml -e cloudflare_tunnel_target_host=<fqdn>`
 - Optional knobs cover metrics endpoints, fallback ingress rules, warp-routing, extra CLI flags, or custom config/credential paths. Check `ansible/env/example/host_vars/qrpc-app01.example.com.yml` for a starter snippet.
+
+WebArena Indigo
+---------------
+
+- `roles/webarena_indigo/` calls the Indigo API from `localhost` to create a WebArena Indigo instance, start it, and report its IP info. Provide the API client ID/secret along with `ssh_key_id`, `region_id`, `os_id`, `plan_id`, and `instance_name` variables (vault them in your real env).
+- Run it from the repo root with your private inventory/vars in place:
+  `/opt/qrpc/pkg/bin/ansible-playbook -i ansible/env/real/inventory.yml ansible/playbooks/webarena_indigo.yml -e webarena_indigo_instance_name=<name>`
+  Always pass the instance name via `-e webarena_indigo_instance_name=...`; the role will fail fast if it is missing.

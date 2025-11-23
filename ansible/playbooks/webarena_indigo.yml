@@ -1,0 +1,8 @@
+---
+# Create a WebArena Indigo instance via API and print its networking details.
+- name: Create WebArena Indigo instance
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - webarena_indigo

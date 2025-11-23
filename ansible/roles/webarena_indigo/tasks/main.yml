@@ -1,0 +1,270 @@
+---
+- name: "Assert WebArena Indigo instance name provided (pass -e webarena_indigo_instance_name=<name>)"
+  ansible.builtin.assert:
+    that:
+      - webarena_indigo_instance_name | string | length > 0
+    fail_msg: "Provide the instance name via -e webarena_indigo_instance_name=<name>; it is not read from inventory."
+
+- name: "Assert required WebArena Indigo settings are present"
+  ansible.builtin.assert:
+    that:
+      - webarena_indigo_client_id | string | length > 0
+      - webarena_indigo_client_secret | string | length > 0
+      - webarena_indigo_ssh_key_id | string | length > 0
+      - webarena_indigo_region_id | string | length > 0
+      - webarena_indigo_os_id | string | length > 0
+      - webarena_indigo_plan_id | string | length > 0
+    fail_msg: "Set WebArena Indigo credentials and instance parameters before running this role."
+
+- name: "Normalize WebArena Indigo API base URL"
+  ansible.builtin.set_fact:
+    webarena_indigo_api_base: "{{ webarena_indigo_api_base_url | regex_replace('/+$', '') }}"
+
+- name: "Request Indigo API access token"
+  ansible.builtin.uri:
+    url: "{{ webarena_indigo_api_base }}/oauth/v1/accesstokens"
+    method: POST
+    headers:
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      grantType: "client_credentials"
+      clientId: "{{ webarena_indigo_client_id }}"
+      clientSecret: "{{ webarena_indigo_client_secret }}"
+      code: ""
+    return_content: yes
+    status_code:
+      - 200
+      - 201
+  register: webarena_indigo_token_response
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Ensure Indigo access token is present"
+  ansible.builtin.assert:
+    that:
+      - webarena_indigo_token_response.json.accessToken | default('') | length > 0
+    fail_msg: "Failed to obtain Indigo API access token."
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Set Indigo access token"
+  ansible.builtin.set_fact:
+    webarena_indigo_access_token: "{{ webarena_indigo_token_response.json.accessToken }}"
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "List existing WebArena Indigo instances"
+  ansible.builtin.uri:
+    url: "{{ webarena_indigo_api_base }}/webarenaIndigo/v1/vm/getinstancelist"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ webarena_indigo_access_token }}"
+    return_content: yes
+    status_code: 200
+  register: webarena_indigo_existing_list
+  changed_when: false
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Normalize existing Indigo instances list"
+  ansible.builtin.set_fact:
+    webarena_indigo_existing_instances: "{{ webarena_indigo_existing_list.json | default([]) | list }}"
+  changed_when: false
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Detect existing instance by name"
+  ansible.builtin.set_fact:
+    webarena_indigo_existing_instance: >-
+      {{
+        (
+          webarena_indigo_existing_instances
+          | selectattr('instance_name', 'equalto', webarena_indigo_instance_name)
+          | list
+          | first
+        )
+        | default(
+          (
+            webarena_indigo_existing_instances
+            | selectattr('instanceName', 'equalto', webarena_indigo_instance_name)
+            | list
+            | first
+          ),
+          true
+        )
+        | default({}, true)
+      }}
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Initialize created instance id placeholder"
+  ansible.builtin.set_fact:
+    webarena_indigo_created_instance_id: ""
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Create WebArena Indigo instance"
+  ansible.builtin.uri:
+    url: "{{ webarena_indigo_api_base }}/webarenaIndigo/v1/vm/createinstance"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ webarena_indigo_access_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      sshKeyId: "{{ webarena_indigo_ssh_key_id }}"
+      regionId: "{{ webarena_indigo_region_id }}"
+      osId: "{{ webarena_indigo_os_id }}"
+      instancePlan: "{{ webarena_indigo_plan_id }}"
+      instanceName: "{{ webarena_indigo_instance_name }}"
+    return_content: yes
+    status_code:
+      - 200
+      - 201
+  register: webarena_indigo_create_response
+  no_log: "{{ webarena_indigo_no_log }}"
+  when: webarena_indigo_existing_instance | length == 0
+
+- name: "Capture created instance id"
+  ansible.builtin.set_fact:
+    webarena_indigo_created_instance_id: >-
+      {{
+        webarena_indigo_create_response.json.vms.id
+          | default(webarena_indigo_create_response.json.id | default("", true), true)
+      }}
+  no_log: "{{ webarena_indigo_no_log }}"
+  when: webarena_indigo_existing_instance | length == 0
+
+- name: "Fail if instance creation was not successful"
+  ansible.builtin.fail:
+    msg: "Indigo instance creation failed: {{ webarena_indigo_create_response.json | default({}) }}"
+  when:
+    - webarena_indigo_existing_instance | length == 0
+    - not (webarena_indigo_create_response.json.success | default(false))
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Set Indigo instance id"
+  ansible.builtin.set_fact:
+    webarena_indigo_instance_id: >-
+      {{
+        webarena_indigo_existing_instance.id
+          | default(webarena_indigo_created_instance_id, true)
+      }}
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Ensure Indigo instance id was returned"
+  ansible.builtin.assert:
+    that:
+      - webarena_indigo_instance_id | string | length > 0
+    fail_msg: "Indigo API did not return an instance id."
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Fetch Indigo instance detail (for status)"
+  ansible.builtin.uri:
+    url: "{{ webarena_indigo_api_base }}/webarenaIndigo/v1/vm/getinstancelist"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ webarena_indigo_access_token }}"
+    return_content: yes
+    status_code: 200
+  register: webarena_indigo_instance_list_status
+  retries: "{{ webarena_indigo_detail_retries }}"
+  delay: "{{ webarena_indigo_detail_delay_seconds }}"
+  until: >
+    (
+      webarena_indigo_instance_list_status.json | default([])
+      | selectattr('id', 'equalto', webarena_indigo_instance_id)
+      | list
+    ) | length > 0
+  changed_when: false
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Set Indigo instance detail (current status)"
+  ansible.builtin.set_fact:
+    webarena_indigo_instance_detail_current: >-
+      {{
+        (webarena_indigo_instance_list_status.json | default([]))
+        | selectattr('id', 'equalto', webarena_indigo_instance_id)
+        | list
+        | first
+        | default({})
+      }}
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Start WebArena Indigo instance"
+  ansible.builtin.uri:
+    url: "{{ webarena_indigo_api_base }}/webarenaIndigo/v1/vm/instance/statusupdate"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ webarena_indigo_access_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      instanceId: "{{ webarena_indigo_instance_id }}"
+      status: "start"
+    return_content: yes
+    status_code: 200
+  register: webarena_indigo_start_response
+  no_log: "{{ webarena_indigo_no_log }}"
+  when: (webarena_indigo_instance_detail_current.instancestatus | default('') | lower) != "running"
+
+- name: "Fail if Indigo instance start was not acknowledged"
+  ansible.builtin.fail:
+    msg: "Indigo start request failed: {{ webarena_indigo_start_response.json | default({}) }}"
+  when:
+    - (webarena_indigo_instance_detail_current.instancestatus | default('') | lower) != "running"
+    - not (webarena_indigo_start_response.json.success | default(false))
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Fetch Indigo instance details"
+  ansible.builtin.uri:
+    url: "{{ webarena_indigo_api_base }}/webarenaIndigo/v1/vm/getinstancelist"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ webarena_indigo_access_token }}"
+    return_content: yes
+    status_code: 200
+  register: webarena_indigo_instance_list
+  retries: "{{ webarena_indigo_detail_retries }}"
+  delay: "{{ webarena_indigo_detail_delay_seconds }}"
+  until: >
+    (
+      webarena_indigo_instance_list.json | default([])
+      | selectattr('id', 'equalto', webarena_indigo_instance_id)
+      | map(attribute='ip')
+      | list
+      | first
+      | default('')
+    ) | length > 0
+  changed_when: false
+  no_log: "{{ webarena_indigo_no_log }}"
+
+- name: "Extract Indigo instance detail"
+  ansible.builtin.set_fact:
+    webarena_indigo_instance_detail: >-
+      {{
+        (webarena_indigo_instance_list.json | default([]))
+        | selectattr('id', 'equalto', webarena_indigo_instance_id)
+        | list
+        | first
+        | default({})
+      }}
+
+- name: "Validate Indigo instance detail contains networking"
+  ansible.builtin.assert:
+    that:
+      - webarena_indigo_instance_detail | length > 0
+      - webarena_indigo_instance_detail.ip | default('') | length > 0
+    fail_msg: "Unable to find networking details for Indigo instance {{ webarena_indigo_instance_id }}."
+
+- name: "Set Indigo networking facts"
+  ansible.builtin.set_fact:
+    webarena_indigo_instance_ip: "{{ webarena_indigo_instance_detail.ip | default('') }}"
+    webarena_indigo_instance_sub_id: "{{ webarena_indigo_instance_detail.sub_id | default(webarena_indigo_instance_detail.secondary_ip | default('')) }}"
+    webarena_indigo_instance_ip_type: "{{ webarena_indigo_instance_detail.ipaddress_type | default('') }}"
+    webarena_indigo_instance_summary:
+      id: "{{ webarena_indigo_instance_id }}"
+      ip: "{{ webarena_indigo_instance_detail.ip | default('') }}"
+      sub_id: "{{ webarena_indigo_instance_detail.sub_id | default(webarena_indigo_instance_detail.secondary_ip | default('')) }}"
+      ip_type: "{{ webarena_indigo_instance_detail.ipaddress_type | default('') }}"
+
+- name: "Print Indigo instance networking details"
+  ansible.builtin.debug:
+    msg:
+      - "ip: {{ webarena_indigo_instance_ip }}"
+      - "sub_id: {{ webarena_indigo_instance_sub_id }}"
+      - "ip_type: {{ webarena_indigo_instance_ip_type }}"

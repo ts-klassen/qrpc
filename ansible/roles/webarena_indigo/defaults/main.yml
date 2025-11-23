@@ -1,0 +1,23 @@
+---
+# Default settings for creating a WebArena Indigo instance via API
+
+# API credentials (required).
+webarena_indigo_client_id: ""
+webarena_indigo_client_secret: ""
+
+# Instance definition (required).
+webarena_indigo_ssh_key_id: ""
+webarena_indigo_region_id: ""
+webarena_indigo_os_id: ""
+webarena_indigo_plan_id: ""
+webarena_indigo_instance_name: ""
+
+# API endpoint tuning.
+webarena_indigo_api_base_url: "https://api.customer.jp"
+
+# Polling behavior when waiting for instance details to include networking info.
+webarena_indigo_detail_retries: 12
+webarena_indigo_detail_delay_seconds: 5
+
+# Toggle logging of API responses that may contain secrets.
+webarena_indigo_no_log: true
