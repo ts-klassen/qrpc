@@ -10,15 +10,12 @@ qrpc_backup_cronolog_path: "/opt/qrpc/pkg/sbin/cronolog"
 # S3 destination details. Bucket is required whenever the backup role runs.
 qrpc_backup_s3_bucket: ""
 qrpc_backup_s3_prefix: "qrpc/{{ inventory_hostname }}"
+# Optional HTTPS endpoint (for S3-compatible services); passed via --s3-endpoint-url when set.
 qrpc_backup_s3_endpoint: ""
 
-# Derived duplicity target URL (auto-computed from bucket/prefix/endpoint).
+# Derived duplicity target URL (auto-computed from bucket/prefix).
 qrpc_backup_target_url: >-
-  {% if qrpc_backup_s3_endpoint | length > 0 -%}
-  {{ qrpc_backup_s3_endpoint | trim('/') }}/{{ qrpc_backup_s3_bucket }}{% if qrpc_backup_s3_prefix | length > 0 %}/{{ qrpc_backup_s3_prefix | trim('/') }}{% endif %}
-  {%- else -%}
-  s3://{{ qrpc_backup_s3_bucket }}{% if qrpc_backup_s3_prefix | length > 0 %}/{{ qrpc_backup_s3_prefix | trim('/') }}{% endif %}
-  {%- endif %}
+  boto3+s3://{{ qrpc_backup_s3_bucket }}{% if qrpc_backup_s3_prefix | length > 0 %}/{{ qrpc_backup_s3_prefix | trim('/') }}{% endif %}
 
 # AWS credentials/region (leave blank when using an IAM role).
 qrpc_backup_aws_access_key_id: ""

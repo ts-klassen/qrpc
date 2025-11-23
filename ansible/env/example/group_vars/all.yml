@@ -35,7 +35,7 @@ cloudflare_tunnel_account_id: "11111111aaaa2222bbbb3333cccc4444"
 # qrpc backups (required). Use Ansible Vault for any real secrets.
 qrpc_backup_s3_bucket: "qrpc-backups-example"
 qrpc_backup_s3_prefix: "env/example/{{ inventory_hostname }}"
-qrpc_backup_s3_endpoint: "s3+https://s3-compatible.example.net"
+qrpc_backup_s3_endpoint: "https://s3-compatible.example.net"
 qrpc_backup_aws_access_key_id: "REPLACE_WITH_VAULTED_VALUE"
 qrpc_backup_aws_secret_access_key: "REPLACE_WITH_VAULTED_VALUE"
 qrpc_backup_aws_region: "us-east-1"

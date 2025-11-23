@@ -30,8 +30,23 @@ if [[ ! -x "$CRONOLOG_BIN" ]]; then
 fi
 
 mkdir -p "$LOG_DIR"
-exec > >("$CRONOLOG_BIN" "$LOG_STREAM")
+set +e
+exec > >(
+  {
+    set +e
+    trap - ERR
+    "$CRONOLOG_BIN" "$LOG_STREAM"
+    status=$?
+    if (( status != 0 && status != 3 )); then
+      ts="$(date --iso-8601=seconds)"
+      printf '%s cronolog exited with status %s; qrpc-backup output now falls back to stderr.\n' "$ts" "$status" >&2
+      cat >&2
+    fi
+    exit 0
+  }
+)
 exec 2>&1
+set -e
 
 SOURCE="{{ qrpc_backup_source_path }}"
 TARGET="{{ qrpc_backup_target_url }}"
@@ -39,6 +54,7 @@ DUPLICITY_BIN="{{ qrpc_backup_duplicity_path }}"
 ARCHIVE_DIR="{{ qrpc_backup_archive_dir }}"
 TEMP_DIR="{{ qrpc_backup_temp_dir }}"
 LOCK_FILE="{{ qrpc_backup_lock_file }}"
+ENV_FILE="{{ qrpc_backup_env_file }}"
 
 if [[ ! -x "$DUPLICITY_BIN" ]]; then
   log "Duplicity binary not executable at $DUPLICITY_BIN"
@@ -57,6 +73,15 @@ fi
 
 umask 027
 mkdir -p "$ARCHIVE_DIR" "$TEMP_DIR"
+
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  set -a
+  source "$ENV_FILE"
+  set +a
+else
+  log "Environment file $ENV_FILE is missing; proceeding without additional environment overrides."
+fi
 
 exec {LOCK_FD}>"$LOCK_FILE"
 if ! flock -n "$LOCK_FD"; then
@@ -77,10 +102,16 @@ EXTRA_ARGS=()
 EXTRA_ARGS+=( "{{ opt }}" )
 {% endfor %}
 
+S3_ARGS=()
+{% if qrpc_backup_s3_endpoint | length > 0 %}
+S3_ARGS+=( "--s3-endpoint-url" "{{ qrpc_backup_s3_endpoint | trim('/') }}" )
+{% endif %}
+
 log "Starting duplicity backup of ${SOURCE} -> ${TARGET}"
 "$DUPLICITY_BIN" \
   "${BASE_ARGS[@]}" \
   "${BACKUP_ARGS[@]}" \
+  "${S3_ARGS[@]}" \
   "${EXCLUDE_ARGS[@]}" \
   "${EXTRA_ARGS[@]}" \
   "$SOURCE" \
@@ -89,6 +120,7 @@ log "Starting duplicity backup of ${SOURCE} -> ${TARGET}"
 log "Pruning backups older than {{ qrpc_backup_retention }}"
 "$DUPLICITY_BIN" \
   "${BASE_ARGS[@]}" \
+  "${S3_ARGS[@]}" \
   "${EXTRA_ARGS[@]}" \
   remove-older-than "{{ qrpc_backup_retention }}" \
   --force \

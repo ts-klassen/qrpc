@@ -74,10 +74,11 @@ Backups
   default `ansible/playbooks/qrpc.yml` play always includes this role and will
   fail fast if the bucket/target information is missing, ensuring the deployment
   never runs without backups configured.
-- Point the role at a non-AWS or mock endpoint by setting
-  `qrpc_backup_s3_endpoint` (for example `s3+https://s3.internal.example`). The
-  computed target becomes `<endpoint>/<bucket>/<prefix>`, keeping the bucket in
-  the path (no `bucket.endpoint` hostnames).
+- The role talks to S3 via the modern `boto3+s3://<bucket>/<prefix>` backend.
+  Point it at a non-AWS or mock endpoint by setting
+  `qrpc_backup_s3_endpoint` (for example `https://s3.internal.example`). When
+  present, the backup script passes `--s3-endpoint-url=<value>` so duplicity
+  reaches that endpoint without changing the target URL format.
 - Store AWS credentials, GPG passphrases, or any sensitive overrides under
   Ansible Vault (`qrpc_backup_aws_access_key_id`,
   `qrpc_backup_aws_secret_access_key`, `qrpc_backup_gpg_passphrase`). You can
