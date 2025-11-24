@@ -1,0 +1,49 @@
+# Managed by Ansible. Provides optional patches for duplicity/boto3 restores.
+import os
+import sys
+
+if os.environ.get("QRPC_DISABLE_S3_IFMATCH") not in (None, "", "0"):
+    try:
+        from s3transfer import download, futures  # pylint: disable=import-error
+        from botocore import httpchecksum  # pylint: disable=import-error
+    except Exception:  # pragma: no cover - defensive import
+        pass
+    else:
+        def _qrpc_noop_provide_object_etag(self, _etag):  # noqa: ANN001
+            # Force s3transfer to skip If-Match headers so S3 endpoints that
+            # rewrite ETags do not reject ranged downloads.
+            self._etag = None  # pylint: disable=protected-access
+
+        futures.TransferMeta.provide_object_etag = _qrpc_noop_provide_object_etag
+
+        _qrpc_original_submit = download.DownloadSubmissionTask._submit
+
+        def _qrpc_submit(self, client, config, osutil, request_executor, io_executor, transfer_future, bandwidth_limiter=None):
+            # Enforce a very large threshold so downloads happen as single GETs
+            # (no Range headers) for S3 endpoints that mishandle partial reads.
+            try:
+                config.multipart_threshold = max(getattr(config, "multipart_threshold", 0), sys.maxsize)
+            except Exception:  # pragma: no cover - best-effort guard
+                pass
+            return _qrpc_original_submit(
+                self,
+                client,
+                config,
+                osutil,
+                request_executor,
+                io_executor,
+                transfer_future,
+                bandwidth_limiter=bandwidth_limiter,
+            )
+
+        download.DownloadSubmissionTask._submit = _qrpc_submit
+
+        _qrpc_original_handle_checksum_body = httpchecksum.handle_checksum_body
+
+        def _qrpc_handle_checksum_body(http_response, response, context, operation_model):
+            # Skip checksum validation - some S3-compatible endpoints supply
+            # incorrect flexible checksums that duplicity cannot ignore.
+            _ = (http_response, response, context, operation_model)
+            return None
+
+        httpchecksum.handle_checksum_body = _qrpc_handle_checksum_body

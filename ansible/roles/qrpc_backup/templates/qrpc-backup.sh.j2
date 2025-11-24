@@ -83,6 +83,16 @@ else
   log "Environment file $ENV_FILE is missing; proceeding without additional environment overrides."
 fi
 
+if [[ "{{ qrpc_backup_disable_s3_if_match | ternary('1', '0') }}" == "1" ]]; then
+  log "Disabling duplicity S3 If-Match enforcement via QRPC shim"
+  export QRPC_DISABLE_S3_IFMATCH=1
+  if [[ -z "${PYTHONPATH:-}" ]]; then
+    export PYTHONPATH="{{ qrpc_backup_python_patch_dir }}"
+  else
+    export PYTHONPATH="{{ qrpc_backup_python_patch_dir }}:${PYTHONPATH}"
+  fi
+fi
+
 exec {LOCK_FD}>"$LOCK_FILE"
 if ! flock -n "$LOCK_FD"; then
   log "Another qrpc backup run is already in progress, skipping."

@@ -84,10 +84,22 @@ Backups
   `qrpc_backup_aws_secret_access_key`, `qrpc_backup_gpg_passphrase`). You can
   omit them entirely when the host uses an IAM role.
 - All helper assets stay under `/opt/qrpc`: the env file lives at
-  `/opt/qrpc/etc/qrpc-backup/backup.env`, the runner script at
-  `/opt/qrpc/bin/qrpc-backup`, and duplicity metadata under
+  `/opt/qrpc/etc/qrpc-backup/backup.env`, the backup runner script at
+  `/opt/qrpc/bin/qrpc-backup`, the manual restore helper at
+  `/opt/qrpc/bin/qrpc-restore`, and duplicity metadata under
   `/opt/qrpc/var/lib/qrpc-backup` (with temp/lock directories alongside). Only
   the systemd unit/timer are placed in `/etc/systemd/system`.
+- Run `/opt/qrpc/bin/qrpc-restore --help` for usage details. It supports listing
+  the most recent files, showing collection status, or restoring all/single
+  paths into a destination directory with optional `--time` and `--force`
+  arguments.
+- Some S3-compatible endpoints reject ranged downloads, conditional requests,
+  or send incorrect flexible checksums when downloading. The role defaults
+  `qrpc_backup_disable_s3_if_match: true`, installs a small
+  `sitecustomize.py` shim, and runs duplicity with `QRPC_DISABLE_S3_IFMATCH=1`
+  so boto3 skips `If-Match`, avoids multipart downloads, and disables checksum
+  enforcement. Set the flag to `false` if you need the stricter AWS-style
+  behavior.
 - Runtime output is streamed through cronolog into
   `/opt/qrpc/var/log/qrpc-backup/%Y%m/%d-%H.log`, satisfying the repo-wide
   logging convention without relying on journald.

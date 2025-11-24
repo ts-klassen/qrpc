@@ -46,6 +46,9 @@ qrpc_backup_lock_file: "{{ qrpc_backup_root_dir }}/var/lock/qrpc-backup.lock"
 qrpc_backup_env_dir: "{{ qrpc_backup_root_dir }}/etc/qrpc-backup"
 qrpc_backup_env_file: "{{ qrpc_backup_env_dir }}/backup.env"
 qrpc_backup_script_path: "{{ qrpc_backup_root_dir }}/bin/qrpc-backup"
+qrpc_restore_script_path: "{{ qrpc_backup_root_dir }}/bin/qrpc-restore"
+qrpc_backup_python_patch_dir: "{{ qrpc_backup_root_dir }}/lib/python"
+qrpc_backup_disable_s3_if_match: true
 
 # Systemd unit/timer names and scheduling.
 qrpc_backup_systemd_service: "qrpc-backup.service"

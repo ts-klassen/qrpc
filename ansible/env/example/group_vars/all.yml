@@ -41,6 +41,7 @@ qrpc_backup_aws_secret_access_key: "REPLACE_WITH_VAULTED_VALUE"
 qrpc_backup_aws_region: "us-east-1"
 qrpc_backup_gpg_passphrase: "REPLACE_WITH_REAL_SECRET"
 qrpc_backup_timer_oncalendar: "daily"
+# qrpc_backup_disable_s3_if_match: true  # uncomment if your S3 endpoint rejects If-Match headers
 
 # WebArena Indigo API settings (used by ansible/playbooks/webarena_indigo.yml).
 # Define these in your private env and vault secrets as needed.

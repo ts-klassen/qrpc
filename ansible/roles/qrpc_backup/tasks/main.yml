@@ -44,7 +44,17 @@
         - { path: "{{ qrpc_backup_temp_dir }}", mode: "0700" }
         - { path: "{{ qrpc_backup_env_dir }}", mode: "0700" }
         - { path: "{{ qrpc_backup_script_path | dirname }}", mode: "0755" }
+        - { path: "{{ qrpc_restore_script_path | dirname }}", mode: "0755" }
         - { path: "{{ qrpc_backup_lock_file | dirname }}", mode: "0700" }
+
+    - name: "Ensure qrpc python patch directory exists"
+      ansible.builtin.file:
+        path: "{{ qrpc_backup_python_patch_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: qrpc_backup_disable_s3_if_match | bool
 
     - name: "Install qrpc backup environment file"
       ansible.builtin.template:
@@ -61,6 +71,23 @@
         owner: root
         group: root
         mode: "0750"
+
+    - name: "Install qrpc restore script"
+      ansible.builtin.template:
+        src: "qrpc-restore.sh.j2"
+        dest: "{{ qrpc_restore_script_path }}"
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: "Install qrpc python sitecustomize patch"
+      ansible.builtin.template:
+        src: "qrpc-sitecustomize.py.j2"
+        dest: "{{ qrpc_backup_python_patch_dir }}/sitecustomize.py"
+        owner: root
+        group: root
+        mode: "0644"
+      when: qrpc_backup_disable_s3_if_match | bool
 
     - name: "Install qrpc backup systemd service"
       ansible.builtin.template:
