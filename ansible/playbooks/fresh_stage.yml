@@ -1,0 +1,268 @@
+---
+# Provision a WebArena Indigo instance, publish it to Cloudflare DNS,
+# install qrpc, and configure Cloudflare tunnels in one run.
+- name: Provision Indigo host and prepare DNS/SSH
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    fresh_stage_default_ssh_port: 22
+    fresh_stage_known_hosts_path: "{{ lookup('env', 'HOME') + '/.ssh/known_hosts' }}"
+    fresh_stage_default_ssh_common_args: "-o UserKnownHostsFile={{ fresh_stage_known_hosts_path }} -o StrictHostKeyChecking=yes"
+  tasks:
+    - name: "Assert stage name (-e name=...) was provided"
+      ansible.builtin.assert:
+        that:
+          - name | default('') | string | length > 0
+        fail_msg: "Pass -e name=<short-hostname> so the playbook can compose the Indigo instance name."
+
+    - name: "Assert qrpc_subdomain and qrpc_zone exist"
+      ansible.builtin.assert:
+        that:
+          - qrpc_subdomain | default('') | string | length > 0
+          - qrpc_zone | default('') | string | length > 0
+        fail_msg: "Define qrpc_subdomain and qrpc_zone (for example in group_vars) before running this playbook."
+
+    - name: "Compose Indigo hostnames"
+      ansible.builtin.set_fact:
+        fresh_stage_short_name: "{{ name }}"
+        fresh_stage_fqdn: "{{ name }}.{{ qrpc_subdomain }}.{{ qrpc_zone }}"
+        fresh_stage_dns_name: "{{ name }}.{{ qrpc_subdomain }}"
+
+    - name: "Capture inventory overrides for {{ fresh_stage_fqdn }}"
+      ansible.builtin.set_fact:
+        fresh_stage_inventory_hostvars: >-
+          {{
+            hostvars[fresh_stage_fqdn]
+            if (hostvars is defined and fresh_stage_fqdn in hostvars)
+            else {}
+          }}
+
+    - name: "Derive connection host metadata"
+      ansible.builtin.set_fact:
+        fresh_stage_connection_host_value: "{{ fresh_stage_inventory_hostvars.ansible_host | default(fresh_stage_fqdn) }}"
+        fresh_stage_connection_host_entry: >-
+          {{
+            '[' ~ (fresh_stage_inventory_hostvars.ansible_host | default(fresh_stage_fqdn)) ~ ']'
+            if ((fresh_stage_inventory_hostvars.ansible_host | default(fresh_stage_fqdn) | string).find(':') != -1)
+            else (fresh_stage_inventory_hostvars.ansible_host | default(fresh_stage_fqdn))
+          }}
+
+    - name: "Derive Indigo-safe instance name"
+      ansible.builtin.set_fact:
+        fresh_stage_indigo_instance_name: "{{ fresh_stage_fqdn | regex_replace('\\.', '_') }}"
+
+    - name: "Create or resume WebArena Indigo instance"
+      ansible.builtin.include_role:
+        name: webarena_indigo
+      vars:
+        webarena_indigo_instance_name: "{{ fresh_stage_indigo_instance_name }}"
+
+    - name: "Capture Indigo networking data"
+      ansible.builtin.set_fact:
+        fresh_stage_instance_ip: "{{ webarena_indigo_instance_ip }}"
+        fresh_stage_instance_ip_type: "{{ webarena_indigo_instance_ip_type | default('ipv4') | lower }}"
+
+    - name: "Determine DNS record type"
+      ansible.builtin.set_fact:
+        fresh_stage_dns_record_type: "{{ 'AAAA' if fresh_stage_instance_ip_type == 'ipv6' else 'A' }}"
+
+    - name: "Assert Cloudflare API token is available"
+      ansible.builtin.assert:
+        that:
+          - cloudflare_api_token | default('') | string | length > 0
+        fail_msg: "Set cloudflare_api_token (preferably via Ansible Vault) before running this playbook."
+
+    - name: "Publish Indigo IP to Cloudflare DNS"
+      community.general.cloudflare_dns:
+        api_token: "{{ cloudflare_api_token }}"
+        zone: "{{ qrpc_zone }}"
+        type: "{{ fresh_stage_dns_record_type }}"
+        record: "{{ fresh_stage_dns_name }}"
+        value: "{{ fresh_stage_instance_ip }}"
+        ttl: 300
+        proxied: false
+      register: fresh_stage_dns_publish
+      failed_when: >
+        fresh_stage_dns_publish.failed | default(false) and
+        (
+          'code: 81058' not in (fresh_stage_dns_publish.msg | default(''))
+        )
+      changed_when: fresh_stage_dns_publish.changed | default(false)
+
+    - name: "Wait for SSH to become reachable"
+      ansible.builtin.wait_for:
+        host: "{{ fresh_stage_instance_ip }}"
+        port: "{{ fresh_stage_ssh_port | default(fresh_stage_default_ssh_port) }}"
+        delay: 5
+        timeout: 300
+
+    - name: "Ensure ~/.ssh directory exists"
+      ansible.builtin.file:
+        path: "{{ fresh_stage_known_hosts_path | dirname }}"
+        state: directory
+        mode: "0700"
+
+    - name: "Ensure known_hosts file exists"
+      ansible.builtin.file:
+        path: "{{ fresh_stage_known_hosts_path }}"
+        state: touch
+        mode: "0600"
+
+    - name: "Set SSH scanning target"
+      ansible.builtin.set_fact:
+        fresh_stage_ssh_scan_host: "{{ fresh_stage_instance_ip }}"
+        fresh_stage_ssh_keyscan_args: "{{ ['-6'] if fresh_stage_dns_record_type == 'AAAA' else [] }}"
+
+    - name: "Remove stale known_hosts entry for {{ fresh_stage_fqdn }}"
+      ansible.builtin.command:
+        cmd: >-
+          ssh-keygen -f "{{ fresh_stage_known_hosts_path }}" -R "{{ fresh_stage_fqdn }}"
+      register: fresh_stage_known_hosts_removed
+      failed_when: false
+      changed_when: "'not found' not in (fresh_stage_known_hosts_removed.stderr | default(''))"
+
+    - name: "Remove stale known_hosts entry for {{ fresh_stage_connection_host_entry }}"
+      ansible.builtin.command:
+        cmd: >-
+          ssh-keygen -f "{{ fresh_stage_known_hosts_path }}" -R "{{ fresh_stage_connection_host_entry }}"
+      register: fresh_stage_known_hosts_conn_removed
+      failed_when: false
+      changed_when: "'not found' not in (fresh_stage_known_hosts_conn_removed.stderr | default(''))"
+      when: fresh_stage_connection_host_entry != fresh_stage_fqdn
+
+    - name: "Compose effective SSH common args"
+      ansible.builtin.set_fact:
+        fresh_stage_effective_ssh_common_args: >-
+          {{
+            (
+              (
+                fresh_stage_default_ssh_common_args | default('')
+              )
+              +
+              (
+                ' -o HostKeyAlias=' ~ fresh_stage_fqdn
+                if (fresh_stage_fqdn | default('') | trim | length) > 0
+                else ''
+              )
+              +
+              (
+                ' ' + fresh_stage_ansible_ssh_common_args
+                if (fresh_stage_ansible_ssh_common_args | default('') | trim | length) > 0
+                else ''
+              )
+            )
+            | trim
+          }}
+
+    - name: "Fetch SSH host keys via ssh-keyscan"
+      ansible.builtin.command:
+        argv: "{{ ['ssh-keyscan'] + (fresh_stage_ssh_keyscan_args | default([])) + ['-p', (fresh_stage_ssh_port | default(fresh_stage_default_ssh_port)) | string, fresh_stage_ssh_scan_host] }}"
+      register: fresh_stage_keyscan
+      changed_when: false
+
+    - name: "Ensure ssh-keyscan succeeded"
+      ansible.builtin.assert:
+        that:
+          - fresh_stage_keyscan.rc == 0
+          - fresh_stage_keyscan.stdout | default('') | length > 0
+        fail_msg: "ssh-keyscan did not yield any host keys; check networking or SSH daemon status."
+
+    - name: "Prepare known_hosts lines keyed by connection names"
+      ansible.builtin.set_fact:
+        fresh_stage_known_host_lines_fqdn: >-
+          {{
+            fresh_stage_keyscan.stdout_lines | default([])
+            | map('regex_replace', '^[^ ]+', fresh_stage_fqdn)
+            | reject('equalto', '')
+            | list
+          }}
+        fresh_stage_known_host_lines_connection: >-
+          {{
+            fresh_stage_keyscan.stdout_lines | default([])
+            | map('regex_replace', '^[^ ]+', fresh_stage_connection_host_entry)
+            | reject('equalto', '')
+            | list
+          }}
+
+    - name: "Add {{ fresh_stage_fqdn }} to known_hosts"
+      ansible.builtin.known_hosts:
+        path: "{{ fresh_stage_known_hosts_path }}"
+        name: "{{ fresh_stage_fqdn }}"
+        key: "{{ item }}"
+      loop: "{{ fresh_stage_known_host_lines_fqdn }}"
+      when: fresh_stage_known_host_lines_fqdn | length > 0
+
+    - name: "Add {{ fresh_stage_connection_host_entry }} to known_hosts"
+      ansible.builtin.known_hosts:
+        path: "{{ fresh_stage_known_hosts_path }}"
+        name: "{{ fresh_stage_connection_host_entry }}"
+        key: "{{ item }}"
+      loop: "{{ fresh_stage_known_host_lines_connection }}"
+      when:
+        - fresh_stage_connection_host_entry != fresh_stage_fqdn
+        - fresh_stage_known_host_lines_connection | length > 0
+
+    - name: "Register Indigo host for follow-up plays"
+      ansible.builtin.add_host:
+        name: "{{ fresh_stage_fqdn }}"
+        ansible_host: "{{ fresh_stage_inventory_hostvars.ansible_host | default(fresh_stage_connection_host_value, true) }}"
+        ansible_user: "{{ fresh_stage_inventory_hostvars.ansible_user | default(fresh_stage_remote_user | default('ubuntu')) }}"
+        ansible_port: "{{ fresh_stage_inventory_hostvars.ansible_port | default(fresh_stage_ssh_port | default(fresh_stage_default_ssh_port)) }}"
+        ansible_ssh_private_key_file: "{{ fresh_stage_inventory_hostvars.ansible_ssh_private_key_file | default(fresh_stage_private_key_file | default(omit), true) }}"
+        ansible_ssh_common_args: >-
+          {{
+            fresh_stage_inventory_hostvars.ansible_ssh_common_args
+            | default(
+                fresh_stage_effective_ssh_common_args
+                if (fresh_stage_effective_ssh_common_args | default('') | length) > 0
+                else omit,
+                true
+            )
+          }}
+        fresh_stage_known_hosts_path: "{{ fresh_stage_known_hosts_path }}"
+        qrpc_target_host: "{{ fresh_stage_fqdn }}"
+        cloudflare_tunnel_target_host: "{{ fresh_stage_fqdn }}"
+        groups:
+          - fresh_stage_targets
+
+    - name: "Expose fresh-stage target facts"
+      ansible.builtin.set_fact:
+        fresh_stage_target_host: "{{ fresh_stage_fqdn }}"
+
+- name: Install qrpc on Indigo host
+  hosts: fresh_stage_targets
+  become: yes
+  pre_tasks:
+    - name: "Normalize qrpc_config_source relative to inventory_dir"
+      ansible.builtin.set_fact:
+        qrpc_config_source: >-
+          {%- set base_dir = inventory_dir | default('', true) | string | trim -%}
+          {%- if base_dir | length == 0 -%}
+            {%- set invsrc = ansible_inventory_sources | default([]) | first | default('', true) | string -%}
+            {%- set base_dir = (invsrc | length > 0) | ternary(invsrc | dirname, '') -%}
+          {%- endif -%}
+          {%- if base_dir | length == 0 -%}
+            {%- set base_dir = playbook_dir | default('.', true) | string | trim -%}
+          {%- endif -%}
+          {%- if base_dir | length == 0 -%}{%- set base_dir = '.' -%}{%- endif -%}
+          {%- set incoming = qrpc_config_source | default('') | string -%}
+          {%- set base_name = (incoming | basename) if (incoming | trim | length) > 0 else (inventory_hostname + '.config') -%}
+          {%- if incoming | regex_search('^/configs/') -%}
+          {{ base_dir + '/configs/' + base_name }}
+          {%- elif (incoming | trim | length) > 0 -%}
+          {{ incoming }}
+          {%- else -%}
+          {{ base_dir + '/configs/' + inventory_hostname + '.config' }}
+          {%- endif -%}
+
+  roles:
+    - ufw
+    - qrpc
+    - qrpc_backup
+
+- name: Deploy Cloudflare tunnels on Indigo host
+  hosts: fresh_stage_targets
+  become: yes
+  roles:
+    - cloudflare_tunnel

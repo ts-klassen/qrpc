@@ -19,5 +19,10 @@ webarena_indigo_api_base_url: "https://api.customer.jp"
 webarena_indigo_detail_retries: 12
 webarena_indigo_detail_delay_seconds: 5
 
+# Retry behavior when sending the start command (API can return 400 if the VM
+# is not ready to transition yet).
+webarena_indigo_start_retries: 10
+webarena_indigo_start_delay_seconds: 10
+
 # Toggle logging of API responses that may contain secrets.
 webarena_indigo_no_log: true

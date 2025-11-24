@@ -65,7 +65,33 @@
 
 - name: "Normalize existing Indigo instances list"
   ansible.builtin.set_fact:
-    webarena_indigo_existing_instances: "{{ webarena_indigo_existing_list.json | default([]) | list }}"
+    webarena_indigo_existing_instances: >-
+      {{
+        (
+          webarena_indigo_existing_list.json.vms
+          if (
+            webarena_indigo_existing_list.json is mapping
+            and webarena_indigo_existing_list.json.vms is defined
+          )
+          else (
+            webarena_indigo_existing_list.json.instances
+            if (
+              webarena_indigo_existing_list.json is mapping
+              and webarena_indigo_existing_list.json.instances is defined
+            )
+            else (
+              webarena_indigo_existing_list.json.data
+              if (
+                webarena_indigo_existing_list.json is mapping
+                and webarena_indigo_existing_list.json.data is defined
+              )
+              else webarena_indigo_existing_list.json
+            )
+          )
+        )
+        | default([])
+        | list
+      }}
   changed_when: false
   no_log: "{{ webarena_indigo_no_log }}"
 
@@ -166,7 +192,30 @@
   delay: "{{ webarena_indigo_detail_delay_seconds }}"
   until: >
     (
-      webarena_indigo_instance_list_status.json | default([])
+      (
+        webarena_indigo_instance_list_status.json.vms
+        if (
+          webarena_indigo_instance_list_status.json is mapping
+          and webarena_indigo_instance_list_status.json.vms is defined
+        )
+        else (
+          webarena_indigo_instance_list_status.json.instances
+          if (
+            webarena_indigo_instance_list_status.json is mapping
+            and webarena_indigo_instance_list_status.json.instances is defined
+          )
+          else (
+            webarena_indigo_instance_list_status.json.data
+            if (
+              webarena_indigo_instance_list_status.json is mapping
+              and webarena_indigo_instance_list_status.json.data is defined
+            )
+            else webarena_indigo_instance_list_status.json
+          )
+        )
+      )
+      | default([])
+      | list
       | selectattr('id', 'equalto', webarena_indigo_instance_id)
       | list
     ) | length > 0
@@ -177,7 +226,30 @@
   ansible.builtin.set_fact:
     webarena_indigo_instance_detail_current: >-
       {{
-        (webarena_indigo_instance_list_status.json | default([]))
+        (
+          webarena_indigo_instance_list_status.json.vms
+          if (
+            webarena_indigo_instance_list_status.json is mapping
+            and webarena_indigo_instance_list_status.json.vms is defined
+          )
+          else (
+            webarena_indigo_instance_list_status.json.instances
+            if (
+              webarena_indigo_instance_list_status.json is mapping
+              and webarena_indigo_instance_list_status.json.instances is defined
+            )
+            else (
+              webarena_indigo_instance_list_status.json.data
+              if (
+                webarena_indigo_instance_list_status.json is mapping
+                and webarena_indigo_instance_list_status.json.data is defined
+              )
+              else webarena_indigo_instance_list_status.json
+            )
+          )
+        )
+        | default([])
+        | list
         | selectattr('id', 'equalto', webarena_indigo_instance_id)
         | list
         | first
@@ -197,17 +269,39 @@
       instanceId: "{{ webarena_indigo_instance_id }}"
       status: "start"
     return_content: yes
-    status_code: 200
+    status_code:
+      - 200
+      - 201
+      - 400
   register: webarena_indigo_start_response
+  retries: "{{ webarena_indigo_start_retries }}"
+  delay: "{{ webarena_indigo_start_delay_seconds }}"
+  until: >-
+    (
+      webarena_indigo_start_response.status | default(0)
+      in [200, 201]
+    )
+    and
+    (
+      webarena_indigo_start_response.json is defined
+      and
+      (webarena_indigo_start_response.json.success | default(false))
+    )
   no_log: "{{ webarena_indigo_no_log }}"
   when: (webarena_indigo_instance_detail_current.instancestatus | default('') | lower) != "running"
 
 - name: "Fail if Indigo instance start was not acknowledged"
   ansible.builtin.fail:
-    msg: "Indigo start request failed: {{ webarena_indigo_start_response.json | default({}) }}"
+    msg: >-
+      Indigo start request failed: {{
+        webarena_indigo_start_response.json
+        if (webarena_indigo_start_response.json is defined)
+        else (webarena_indigo_start_response.content | default({}))
+      }}
   when:
     - (webarena_indigo_instance_detail_current.instancestatus | default('') | lower) != "running"
-    - not (webarena_indigo_start_response.json.success | default(false))
+    - webarena_indigo_start_response.json is not defined
+      or not (webarena_indigo_start_response.json.success | default(false))
   no_log: "{{ webarena_indigo_no_log }}"
 
 - name: "Fetch Indigo instance details"
@@ -223,12 +317,37 @@
   delay: "{{ webarena_indigo_detail_delay_seconds }}"
   until: >
     (
-      webarena_indigo_instance_list.json | default([])
-      | selectattr('id', 'equalto', webarena_indigo_instance_id)
-      | map(attribute='ip')
-      | list
-      | first
-      | default('')
+      (
+        (
+          webarena_indigo_instance_list.json.vms
+          if (
+            webarena_indigo_instance_list.json is mapping
+            and webarena_indigo_instance_list.json.vms is defined
+          )
+          else (
+            webarena_indigo_instance_list.json.instances
+            if (
+              webarena_indigo_instance_list.json is mapping
+              and webarena_indigo_instance_list.json.instances is defined
+            )
+            else (
+              webarena_indigo_instance_list.json.data
+              if (
+                webarena_indigo_instance_list.json is mapping
+                and webarena_indigo_instance_list.json.data is defined
+              )
+              else webarena_indigo_instance_list.json
+            )
+          )
+        )
+        | default([])
+        | list
+        | selectattr('id', 'equalto', webarena_indigo_instance_id)
+        | map(attribute='ip')
+        | list
+        | first
+        | default('')
+      )
     ) | length > 0
   changed_when: false
   no_log: "{{ webarena_indigo_no_log }}"
@@ -237,7 +356,30 @@
   ansible.builtin.set_fact:
     webarena_indigo_instance_detail: >-
       {{
-        (webarena_indigo_instance_list.json | default([]))
+        (
+          webarena_indigo_instance_list.json.vms
+          if (
+            webarena_indigo_instance_list.json is mapping
+            and webarena_indigo_instance_list.json.vms is defined
+          )
+          else (
+            webarena_indigo_instance_list.json.instances
+            if (
+              webarena_indigo_instance_list.json is mapping
+              and webarena_indigo_instance_list.json.instances is defined
+            )
+            else (
+              webarena_indigo_instance_list.json.data
+              if (
+                webarena_indigo_instance_list.json is mapping
+                and webarena_indigo_instance_list.json.data is defined
+              )
+              else webarena_indigo_instance_list.json
+            )
+          )
+        )
+        | default([])
+        | list
         | selectattr('id', 'equalto', webarena_indigo_instance_id)
         | list
         | first

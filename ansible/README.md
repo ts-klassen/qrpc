@@ -179,3 +179,24 @@ WebArena Indigo
 - Run it from the repo root with your private inventory/vars in place:
   `/opt/qrpc/pkg/bin/ansible-playbook -i ansible/env/real/inventory.yml ansible/playbooks/webarena_indigo.yml -e webarena_indigo_instance_name=<name>`
   Always pass the instance name via `-e webarena_indigo_instance_name=...`; the role will fail fast if it is missing.
+
+Fresh stage flow
+----------------
+
+- `ansible/playbooks/fresh_stage.yml` ties everything together: it creates the Indigo instance (naming it `<name>.<qrpc_subdomain>.<qrpc_zone>`), publishes the returned IP to Cloudflare DNS, pre-populates `~/.ssh/known_hosts`, installs qrpc (plus backups/UFW), and finishes by applying the Cloudflare tunnel role to that host.
+- The WebArena API does not allow dots in instance names, so the play automatically swaps `.` for `_` when it passes the name to Indigo; DNS and qrpc still use the FQDN form.
+- Required inputs:
+  - `-e name=<short-hostname>` – the only CLI var you need to pass; it becomes the Indigo VM name, DNS label, and qrpc target host.
+  - `qrpc_subdomain` and `qrpc_zone` must exist in your vars (e.g., `group_vars/all.yml` or an inventory var), so the playbook can derive `<name>.<qrpc_subdomain>.<qrpc_zone>` without repeating them on the command line.
+  - Your Indigo API credentials/settings, Cloudflare API token, qrpc release vars, host-vars (e.g., `qrpc_config_source`, `cloudflare_tunnels`) just like the standalone playbooks.
+- Optional extras:
+  - Override `fresh_stage_remote_user`, `fresh_stage_ssh_port`, `fresh_stage_private_key_file`, or `fresh_stage_ansible_ssh_common_args` via `-e` if the new VM needs non-default SSH settings (defaults are `ubuntu`, port `22`, and the controller's SSH config).
+- Example end-to-end run:
+  ```
+  /opt/qrpc/pkg/bin/ansible-playbook \
+    -i ansible/env/real/inventory.yml \
+    ansible/playbooks/fresh_stage.yml \
+    -e name=app04
+  ```
+  Add overrides like `-e fresh_stage_remote_user=ubuntu` or `-e fresh_stage_private_key_file=~/.ssh/qrpc-id_rsa` only if the new VM needs non-default SSH settings.
+  ```
