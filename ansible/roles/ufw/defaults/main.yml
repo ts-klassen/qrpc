@@ -1,0 +1,48 @@
+---
+# Desired state of the UFW firewall. Set to "disabled" to turn off but leave
+# rules in place.
+ufw_state: "enabled"
+
+# Logging level handed to the ufw module (`off`, `low`, `medium`, or `high`).
+ufw_logging: "off"
+
+# Per-direction default policies passed to the UFW module.
+ufw_default_policies:
+  incoming: "deny"
+  outgoing: "allow"
+  routed: "deny"
+
+# Additional "ufw" CLI arguments to open or restrict specific flows.
+# Each rule is handed to community.general.ufw as-is, so any module parameter
+# (port, proto, from_ip, to_ip, direction, comment, etc.) can be used.
+ufw_rules:
+  - rule: "allow"
+    direction: "in"
+    proto: "tcp"
+    port: 22
+    comment: "Allow SSH"
+
+# Ports that must never be blocked for inbound traffic. The role fails fast if
+# a rule attempts to deny/reject these ports or if no allow rule exists when the
+# default incoming policy blocks them.
+ufw_protected_ports:
+  - 22
+
+# Application profile names that imply a protected port when used in allow/deny
+# rules. Keys must be lowercase.
+ufw_protected_port_alias_map:
+  openssh:
+    - 22
+
+# Action keywords considered "blocking" vs "allowing". Override only when
+# using custom UFW rule types.
+ufw_blocking_actions:
+  - "deny"
+  - "reject"
+ufw_allow_actions:
+  - "allow"
+  - "limit"
+
+# Packages to install before configuring the firewall.
+ufw_package_names:
+  - "ufw"

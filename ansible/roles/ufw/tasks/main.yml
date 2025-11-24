@@ -1,0 +1,154 @@
+---
+- name: "Fail if not running on Ubuntu 24.04"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] == "Debian"
+      - ansible_facts['distribution'] == "Ubuntu"
+      - ansible_facts['distribution_version'] is version("24.04", "==")
+    fail_msg: "The ufw role only supports Ubuntu 24.04."
+
+- name: "Normalize UFW action keywords"
+  ansible.builtin.set_fact:
+    ufw_blocking_actions_lower: "{{ ufw_blocking_actions | map('lower') | list }}"
+    ufw_allow_actions_lower: "{{ ufw_allow_actions | map('lower') | list }}"
+
+- name: "Initialize protected port tracking"
+  ansible.builtin.set_fact:
+    ufw_protected_ports_blocked: []
+    ufw_protected_ports_allowed: []
+
+- name: "Record rules that block protected ports"
+  ansible.builtin.set_fact:
+    ufw_protected_ports_blocked: "{{ ufw_protected_ports_blocked + ufw_rule_matching_ports }}"
+  loop: "{{ ufw_rules }}"
+  vars:
+    ufw_rule_port_number: "{{ ((item.port | string) | regex_search('^\\d+')) | default('') }}"
+    ufw_rule_action_lower: "{{ (item.rule | string | lower) if (item.rule is defined) else '' }}"
+    ufw_rule_direction: "{{ item.direction | default('in') | string | lower }}"
+    ufw_rule_app_lower: "{{ (item.app | string | lower) if (item.app is defined) else '' }}"
+    ufw_rule_name_lower: "{{ (item.name | string | lower) if (item.name is defined) else '' }}"
+    ufw_rule_alias_ports: "{{ [ufw_protected_port_alias_map.get(ufw_rule_app_lower, []), ufw_protected_port_alias_map.get(ufw_rule_name_lower, [])] | flatten | map('int') | list }}"
+    ufw_rule_explicit_ports: "{{ [ufw_rule_port_number | int] if (ufw_rule_port_number | length > 0) else [] }}"
+    ufw_rule_candidate_ports: "{{ (ufw_rule_explicit_ports + ufw_rule_alias_ports) | unique | list }}"
+    ufw_rule_matching_ports: "{{ ufw_rule_candidate_ports | select('in', ufw_protected_ports) | list }}"
+  when:
+    - item.rule is defined
+    - ufw_rule_action_lower in ufw_blocking_actions_lower
+    - ufw_rule_direction == "in"
+    - ufw_rule_matching_ports | length > 0
+  loop_control:
+    label: "{{ item.comment | default(item.port | default('rule')) }}"
+
+- name: "Record rules that allow protected ports"
+  ansible.builtin.set_fact:
+    ufw_protected_ports_allowed: "{{ ufw_protected_ports_allowed + ufw_rule_matching_ports }}"
+  loop: "{{ ufw_rules }}"
+  vars:
+    ufw_rule_port_number: "{{ ((item.port | string) | regex_search('^\\d+')) | default('') }}"
+    ufw_rule_action_lower: "{{ (item.rule | string | lower) if (item.rule is defined) else '' }}"
+    ufw_rule_direction: "{{ item.direction | default('in') | string | lower }}"
+    ufw_rule_app_lower: "{{ (item.app | string | lower) if (item.app is defined) else '' }}"
+    ufw_rule_name_lower: "{{ (item.name | string | lower) if (item.name is defined) else '' }}"
+    ufw_rule_alias_ports: "{{ [ufw_protected_port_alias_map.get(ufw_rule_app_lower, []), ufw_protected_port_alias_map.get(ufw_rule_name_lower, [])] | flatten | map('int') | list }}"
+    ufw_rule_explicit_ports: "{{ [ufw_rule_port_number | int] if (ufw_rule_port_number | length > 0) else [] }}"
+    ufw_rule_candidate_ports: "{{ (ufw_rule_explicit_ports + ufw_rule_alias_ports) | unique | list }}"
+    ufw_rule_matching_ports: "{{ ufw_rule_candidate_ports | select('in', ufw_protected_ports) | list }}"
+  when:
+    - item.rule is defined
+    - ufw_rule_action_lower in ufw_allow_actions_lower
+    - ufw_rule_direction == "in"
+    - ufw_rule_matching_ports | length > 0
+  loop_control:
+    label: "{{ item.comment | default(item.port | default('rule')) }}"
+
+- name: "Determine whether incoming policy blocks protected ports"
+  ansible.builtin.set_fact:
+    ufw_incoming_policy_blocks_protected_ports: "{{ (ufw_default_policies.incoming | default('deny') | lower) in ufw_blocking_actions_lower }}"
+
+- name: "Warn when rules explicitly block protected ports"
+  ansible.builtin.debug:
+    msg: >-
+      UFW configuration attempts to block incoming SSH on ports {{ ufw_protected_ports_blocked | unique | join(', ') }}.
+      Remove deny/reject rules for these ports.
+    warn: true
+  when: ufw_protected_ports_blocked | length > 0
+
+- name: "Fail when rules explicitly block protected ports"
+  ansible.builtin.fail:
+    msg: >-
+      Refusing to apply UFW policies because they block incoming SSH (ports {{ ufw_protected_ports_blocked | unique | join(', ') }}).
+      Update ufw_rules to keep SSH reachable.
+  when: ufw_protected_ports_blocked | length > 0
+
+- name: "Compute missing protected ports when incoming policy blocks by default"
+  ansible.builtin.set_fact:
+    ufw_missing_protected_ports: "{{ ufw_protected_ports | difference(ufw_protected_ports_allowed | unique) }}"
+  when: ufw_incoming_policy_blocks_protected_ports
+
+- name: "Warn when protected ports would be blocked by default"
+  ansible.builtin.debug:
+    msg: >-
+      UFW default incoming policy is blocking and no allow rule was found for ports {{ (ufw_missing_protected_ports | default([])) | join(', ') }}.
+      Add explicit allow rules before retrying.
+    warn: true
+  when:
+    - ufw_incoming_policy_blocks_protected_ports
+    - (ufw_missing_protected_ports | default([])) | length > 0
+
+- name: "Fail when protected ports would be blocked by default"
+  ansible.builtin.fail:
+    msg: >-
+      Refusing to update UFW defaults because ports {{ (ufw_missing_protected_ports | default([])) | join(', ') }} would become inaccessible over SSH.
+      Add allow rules for these ports.
+  when:
+    - ufw_incoming_policy_blocks_protected_ports
+    - (ufw_missing_protected_ports | default([])) | length > 0
+
+- name: "Ensure UFW packages are installed"
+  ansible.builtin.apt:
+    name: "{{ ufw_package_names }}"
+    state: present
+    update_cache: yes
+  become: yes
+
+- name: "Configure UFW default policies"
+  community.general.ufw:
+    direction: "{{ item.key }}"
+    policy: "{{ item.value }}"
+  loop: "{{ ufw_default_policies | dict2items }}"
+  when: ufw_default_policies | length > 0
+  become: yes
+
+- name: "Configure UFW rules"
+  community.general.ufw:
+    rule: "{{ item.rule }}"
+    proto: "{{ item.proto | default(omit) }}"
+    port: "{{ item.port | default(omit) }}"
+    direction: "{{ item.direction | default(omit) }}"
+    from_ip: "{{ item.from_ip | default(omit) }}"
+    to_ip: "{{ item.to_ip | default(omit) }}"
+    from_port: "{{ item.from_port | default(omit) }}"
+    to_port: "{{ item.to_port | default(omit) }}"
+    comment: "{{ item.comment | default(omit) }}"
+    log: "{{ item.log | default(omit) }}"
+    delete: "{{ item.delete | default(omit) }}"
+    insert: "{{ item.insert | default(omit) }}"
+    interface: "{{ item.interface | default(omit) }}"
+    route: "{{ item.route | default(omit) }}"
+    app: "{{ item.app | default(omit) }}"
+  loop: "{{ ufw_rules }}"
+  when:
+    - ufw_rules | length > 0
+    - item.rule is defined
+  become: yes
+
+- name: "Configure UFW logging"
+  community.general.ufw:
+    logging: "{{ ufw_logging }}"
+  when: ufw_logging is defined and ufw_logging | length > 0
+  become: yes
+
+- name: "Ensure UFW state"
+  community.general.ufw:
+    state: "{{ ufw_state }}"
+  become: yes

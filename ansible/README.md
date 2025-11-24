@@ -16,6 +16,9 @@ Overview
 - **Role:** `roles/qrpc_backup/` configures duplicity-based backups for
   `/opt/qrpc`. It drops a wrapper script, credentials env file, and a
   `qrpc-backup.service`/`.timer` pair so backups run automatically.
+- **Role:** `roles/ufw/` manages Ubuntu's UFW firewall. It sets sane defaults,
+  applies the allow/deny rules you list in vars, and refuses to continue if a
+  rule or policy would block inbound SSH on port 22.
 - **Role:** `roles/cloudflare_tunnel/` installs Cloudflare's `cloudflared`
   connector on a host, creates/updates one or more tunnels via the Cloudflare
   API, writes each tunnel's credentials/config, and manages dedicated systemd
@@ -64,6 +67,23 @@ Files you should customize
   on every run, ensuring you never deploy without naming the exact host. Add
   more playbooks under `ansible/playbooks/` (database, all-in-one, etc.) as
   needed.
+
+Firewall
+--------
+
+- The default `ansible/playbooks/qrpc.yml` run now includes the `ufw` role so
+  every host receives a consistent UFW policy before qrpc is (re)installed.
+- Manage the firewall through vars such as `ufw_default_policies`,
+  `ufw_rules`, and `ufw_protected_ports` (see `env/example/group_vars/all.yml`
+  for a reference snippet). All the rule attributes map directly to
+  `community.general.ufw`.
+- When you rely on application profiles (for example `OpenSSH`) instead of a
+  numeric `port`, list their lowercase names under
+  `ufw_protected_port_alias_map` so the safety checks treat them as covering the
+  protected port(s).
+- SSH safety is enforced: adding a deny/reject rule for port 22 or omitting an
+  allow rule while the incoming default policy blocks traffic will make the role
+  fail before any firewall command runs.
 
 Backups
 -------

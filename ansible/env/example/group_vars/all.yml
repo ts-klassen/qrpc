@@ -14,6 +14,26 @@ qrpc_arch: "x86_64-unknown-linux-gnu"
 qrpc_source_type: "local"
 qrpc_source_path: "{{ qrpc_repo_root }}/_release_packages/qrpc-{{ qrpc_version }}-{{ qrpc_arch }}.tar.gz"
 
+# Host firewall management (UFW). The bundled role enforces that SSH (port 22)
+# stays reachable; removing the allow rule below will make the play fail fast.
+# Add additional allow entries for any service ports you expose on the host.
+ufw_rules:
+  - rule: "allow"
+    direction: "in"
+    proto: "tcp"
+    port: 22
+    comment: "Allow SSH"
+  - rule: "allow"
+    direction: "in"
+    proto: "tcp"
+    port: 80
+    comment: "Expose qrpc HTTP"
+  - rule: "allow"
+    direction: "in"
+    proto: "tcp"
+    port: 443
+    comment: "Expose qrpc HTTPS"
+
 # Cloudflare DNS management (optional). Define `cloudflare_api_token`
 # directly in this file once encrypted with Ansible Vault. The list below
 # illustrates the expected record structure.
