@@ -11,6 +11,7 @@
       origin_request: "{{ cloudflare_tunnel_current.origin_request | default(cloudflare_tunnel_origin_request) }}"
       warp_routing: "{{ cloudflare_tunnel_current.warp_routing | default(cloudflare_tunnel_warp_routing) }}"
       extra_config: "{{ cloudflare_tunnel_current.extra_config | default(cloudflare_tunnel_extra_config) }}"
+      edge_ip_version: "{{ cloudflare_tunnel_current.edge_ip_version | default(cloudflare_tunnel_edge_ip_version) }}"
       credentials_json: "{{ cloudflare_tunnel_current.credentials_json | default(cloudflare_tunnel_credentials_json) }}"
       config_path: "{{ cloudflare_tunnel_current.config_path | default(cloudflare_tunnel_config_dir ~ '/' ~ (cloudflare_tunnel_current.config_filename | default(cloudflare_tunnel_current.name ~ '.yml'))) }}"
       credentials_path: "{{ cloudflare_tunnel_current.credentials_path | default(cloudflare_tunnel_config_dir ~ '/' ~ (cloudflare_tunnel_current.credentials_filename | default(cloudflare_tunnel_current.name ~ '.json'))) }}"
@@ -25,6 +26,13 @@
       dns_proxied: "{{ cloudflare_tunnel_current.dns_proxied | default(cloudflare_tunnel_dns_proxied) }}"
       zone_name: "{{ cloudflare_tunnel_current.zone_name | default(cloudflare_tunnel_zone_name) }}"
       zone_id: "{{ cloudflare_tunnel_current.zone_id | default(cloudflare_tunnel_zone_id) }}"
+
+- name: "Auto-select IPv6 edges on IPv6-only hosts"
+  ansible.builtin.set_fact:
+    cloudflare_tunnel_ctx: "{{ cloudflare_tunnel_ctx | combine({'edge_ip_version': '6'}) }}"
+  when:
+    - (cloudflare_tunnel_ctx.edge_ip_version | default('')) | string | length == 0
+    - (ansible_facts.get('default_ipv4', {}).get('address') | default('')) | string | length == 0
 
 - name: "Validate tunnel definition"
   ansible.builtin.assert:

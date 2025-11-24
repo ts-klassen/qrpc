@@ -2,6 +2,9 @@
 {% set tunnel_identifier = cloudflare_tunnel_template_ctx.tunnel_id | default(cloudflare_tunnel_template_ctx.id | default(cloudflare_tunnel_template_ctx.name)) %}
 tunnel: {{ tunnel_identifier }}
 credentials-file: {{ cloudflare_tunnel_template_ctx.credentials_path }}
+{% if cloudflare_tunnel_template_ctx.edge_ip_version %}
+edge-ip-version: {{ cloudflare_tunnel_template_ctx.edge_ip_version }}
+{% endif %}
 {% if cloudflare_tunnel_template_ctx.metrics_endpoint %}
 metrics: {{ cloudflare_tunnel_template_ctx.metrics_endpoint }}
 {% endif %}

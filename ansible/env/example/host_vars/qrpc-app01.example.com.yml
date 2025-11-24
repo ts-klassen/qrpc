@@ -7,6 +7,8 @@ qrpc_config_source: "{{ inventory_dir }}/configs/qrpc-app01.config"
 # account ID live in group_vars/all.yml; override them here if needed.
 cloudflare_tunnels:
   - name: "qrpc-app01"
+    # Force IPv6 edges when the host lacks IPv4.
+    edge_ip_version: 6
     ingress:
       - hostname: "app01.example.net"
         service: "http://127.0.0.1:8000"
