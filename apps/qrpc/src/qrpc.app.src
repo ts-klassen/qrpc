@@ -9,6 +9,7 @@
    , klsn
    , cowboy
    , erlcloud
+   , amqp_client
    ]},
   {env,[]},
   {modules, []},

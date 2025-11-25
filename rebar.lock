@@ -1,5 +1,6 @@
 {"1.2.0",
-[{<<"base16">>,{pkg,<<"base16">>,<<"2.0.1">>},1},
+[{<<"amqp_client">>,{pkg,<<"amqp_client">>,<<"3.12.2">>},0},
+ {<<"base16">>,{pkg,<<"base16">>,<<"2.0.1">>},1},
  {<<"cowboy">>,
   {git,"https://github.com/ninenines/cowboy.git",
        {ref,"495e74ada88d0876d7e438d53f11af767a9cdcc4"}},
@@ -7,6 +8,9 @@
  {<<"cowlib">>,
   {git,"https://github.com/ninenines/cowlib",
        {ref,"aca0ad953417b29bab2c41eeb4c37c98606c848b"}},
+  1},
+ {<<"credentials_obfuscation">>,
+  {pkg,<<"credentials_obfuscation">>,<<"3.4.0">>},
   1},
  {<<"eini">>,{pkg,<<"eini">>,<<"1.2.9">>},1},
  {<<"erlcloud">>,
@@ -23,19 +27,32 @@
        {ref,"be0aad53b293305ea8105243044943ccf760f72e"}},
   0},
  {<<"lhttpc">>,{pkg,<<"lhttpc">>,<<"1.7.1">>},1},
+ {<<"rabbit_common">>,{pkg,<<"rabbit_common">>,<<"3.12.2">>},1},
  {<<"ranch">>,
   {git,"https://github.com/ninenines/ranch",
        {ref,"10b51304b26062e0dbfd5e74824324e9a911e269"}},
-  1}]}.
+  1},
+ {<<"recon">>,{pkg,<<"recon">>,<<"2.5.3">>},2},
+ {<<"thoas">>,{pkg,<<"thoas">>,<<"1.0.0">>},2}]}.
 [
 {pkg_hash,[
+ {<<"amqp_client">>, <<"19770F1075FE697BEA8AA77E29DF38BD8A439F8D9F1D8A8FCCB56AE0C7AF73CD">>},
  {<<"base16">>, <<"F0549F732E03BE8124ED0D19FD5EE52146CC8BE24C48CBC3F23AB44B157F11A2">>},
+ {<<"credentials_obfuscation">>, <<"34E18B126B3AEFD6E8143776FBE1CECEEA6792307C99AC5EE8687911F048CFD7">>},
  {<<"eini">>, <<"FCC3CBD49BBDD9A1D9735C7365DAFFCD84481CCE81E6CB80537883AA44AC4895">>},
  {<<"jsx">>, <<"08154624050333919B4AC1B789667D5F4DB166DC50E190C4D778D1587F102EE0">>},
- {<<"lhttpc">>, <<"8522AF9877765C33318A3AE486BE69BC165E835D05C3334A8166FD7B318D446B">>}]},
+ {<<"lhttpc">>, <<"8522AF9877765C33318A3AE486BE69BC165E835D05C3334A8166FD7B318D446B">>},
+ {<<"rabbit_common">>, <<"FA46F2954F6F5E28D69AFDEFB10F15C4782402411FAC743BC2459A07DCF83B4C">>},
+ {<<"recon">>, <<"739107B9050EA683C30E96DE050BC59248FD27EC147696F79A8797FF9FA17153">>},
+ {<<"thoas">>, <<"567C03902920827A18A89F05B79A37B5BF93553154B883E0131801600CF02CE0">>}]},
 {pkg_hash_ext,[
+ {<<"amqp_client">>, <<"004BBF9A4129751195660D5347FD89675564C298979C834189E9B24677AFAE94">>},
  {<<"base16">>, <<"06EA2D48343282E712160BA89F692B471DB8B36ABE8394F3445FF9032251D772">>},
+ {<<"credentials_obfuscation">>, <<"738ACE0ED5545D2710D3F7383906FC6F6B582D019036E5269C4DBD85DBCED566">>},
  {<<"eini">>, <<"DA64AE8DB7C2F502E6F20CDF44CD3D9BE364412B87FF49FEBF282540F673DFCB">>},
  {<<"jsx">>, <<"EED26A0D04D217F9EECEFFFB89714452556CF90EB38F290A27A4D45B9988F8C0">>},
- {<<"lhttpc">>, <<"154EEB27692482B52BE86406DCD1D18A2405CAFCE0E8DAA4A1A7BFA7FE295896">>}]}
+ {<<"lhttpc">>, <<"154EEB27692482B52BE86406DCD1D18A2405CAFCE0E8DAA4A1A7BFA7FE295896">>},
+ {<<"rabbit_common">>, <<"33FE4EB510B1E72A2734B9C3D081F76059A07ED7D76C9B9403276AF9D5AFC1B1">>},
+ {<<"recon">>, <<"6C6683F46FD4A1DFD98404B9F78DCABC7FCD8826613A89DCB984727A8C3099D7">>},
+ {<<"thoas">>, <<"FC763185B932ECB32A554FB735EE03C3B6B1B31366077A2427D2A97F3BD26735">>}]}
 ].

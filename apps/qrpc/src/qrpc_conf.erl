@@ -27,6 +27,7 @@
              | dlog_config % -> #{atom() => disk_log:dlog_options()}
              | dlog_dir % -> file:filename()
              | subsystem % -> #{ Subsystem::atom() => #{ module() => term() } }
+             | rabbitmq % -> #{ host => klsn:binstr(), port => inet:port_number(), username => klsn:binstr(), password => klsn:binstr(), vhost => klsn:binstr() }
              .
 
 -type path() :: [atom()].
@@ -43,6 +44,7 @@
                | file:filename()
                | #{atom() => disk_log:dlog_options()}
                | #{atom() => #{atom() => term()}}
+               | #{host => klsn:binstr(), port => inet:port_number(), username => klsn:binstr(), password => klsn:binstr(), vhost => klsn:binstr()}
                .
 
 -spec get(key() | path()) -> value().
