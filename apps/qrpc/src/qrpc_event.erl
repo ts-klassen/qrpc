@@ -399,15 +399,16 @@ sub_queue_name(Namespace) ->
 
 -spec encode_event(namespace(), id(), message()) -> binary().
 encode_event(Namespace, Id, Message) ->
-    jsone:encode(#{
-        namespace => Namespace,
-        id => Id,
-        message => Message
-    }).
+    iolist_to_binary(json:encode(#{
+        <<"namespace">> => Namespace,
+        <<"id">> => Id,
+        <<"message">> => Message
+    })).
 
 -spec decode_event(binary()) -> event_payload().
 decode_event(Binary) ->
-    jsone:decode(Binary, [{object_format, map}, {keys, atom}]).
+    Map = json:decode(Binary),
+    qrpc_sanitizer:normalize(external, event_payload_rule(), Map).
 
 -spec get_all_from_queue(pid(), klsn:binstr()) -> [event_payload()].
 get_all_from_queue(Channel, QueueName) ->
