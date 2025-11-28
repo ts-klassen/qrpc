@@ -32,6 +32,12 @@ init([]) ->
           , start => {qrpc_counter, start_link, []}
           , restart => permanent
           , type => worker
+        },
+        #{
+            id => qrpc_kvs_1
+          , start => {qrpc_kvs, start_link, []}
+          , restart => permanent
+          , type => worker
         }
     ],
     SupFlags = #{strategy => one_for_one,

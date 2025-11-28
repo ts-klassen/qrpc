@@ -6,6 +6,7 @@ install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc
 install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc/stdout
 install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc/stderr
 install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/dlog
+install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/dets
 install -d -o qrpc -g qrpc -m 0750 /opt/qrpc/rel
 ./pkg_add -u qrpc-prod-*.tgz
 cat > /opt/qrpc/pkg/etc/ca-certificates-dir.conf << EOF

@@ -4,6 +4,7 @@
         open/1
       , log/2
       , alog/2
+      , sync/1
     ]).
 
 -export_type([
@@ -64,6 +65,19 @@ alog(Name, Entry) ->
        log(Name, Entry)
     end),
     ok.
+
+-spec sync(name()) -> ok | {error, disk_log:sync_error_rsn()}.
+sync(Name) ->
+    Now = erlang:system_time(second),
+    Current = hourly_log_name(Name, calendar:system_time_to_local_time(Now, second)),
+    Previous = hourly_log_name(Name, calendar:system_time_to_local_time(Now - 3600, second)),
+    PrevRes = disk_log:sync(Previous),
+    CurrRes = disk_log:sync(Current),
+    case {PrevRes, CurrRes} of
+        {ok, _} -> ok;
+        {_, ok} -> ok;
+        {_, Error} -> Error
+    end.
 
 -spec gc(name()) -> ok.
 gc(Name) ->

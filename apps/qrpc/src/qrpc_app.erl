@@ -39,4 +39,5 @@ start(_StartType, _StartArgs) ->
     qrpc_sup:start_link().
 
 stop(_State) ->
+    cowboy:stop_listener(qrpc_http_listener),
     ok.

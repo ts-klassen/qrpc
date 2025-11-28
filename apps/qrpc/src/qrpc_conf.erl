@@ -26,6 +26,7 @@
              | roles % -> [Role:atom()]
              | dlog_config % -> #{atom() => disk_log:dlog_options()}
              | dlog_dir % -> file:filename()
+             | kvs_dets_path % -> file:filename()
              | subsystem % -> #{ Subsystem::atom() => #{ module() => term() } }
              | rabbitmq % -> #{ host => klsn:binstr(), port => inet:port_number(), username => klsn:binstr(), password => klsn:binstr(), vhost => klsn:binstr() }
              .
