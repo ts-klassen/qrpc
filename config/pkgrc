@@ -1,13 +1,13 @@
 getent group qrpc >/dev/null 2>&1 || groupadd -r qrpc
 id -u qrpc >/dev/null 2>&1 || useradd -r -g qrpc -d /opt/qrpc/home/qrpc -s /usr/sbin/nologin -M qrpc
-install -d -o root -g root -m 0755 /opt/qrpc/home
+install -d -o root -g root -m 0750 /opt/qrpc/home
 install -d -o qrpc -g qrpc -m 0750 /opt/qrpc/home/qrpc
-install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc
-install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc/stdout
-install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/qrpc/stderr
-install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/log/dlog
-install -d -o qrpc -g qrpc -m 0755 /opt/qrpc/var/dets
-install -d -o qrpc -g qrpc -m 0750 /opt/qrpc/rel
+install -d -o qrpc -g qrpc -m 0770 /opt/qrpc/var/log/qrpc
+install -d -o qrpc -g qrpc -m 0770 /opt/qrpc/var/log/qrpc/stdout
+install -d -o qrpc -g qrpc -m 0770 /opt/qrpc/var/log/qrpc/stderr
+install -d -o qrpc -g qrpc -m 0770 /opt/qrpc/var/log/dlog
+install -d -o qrpc -g qrpc -m 0770 /opt/qrpc/var/dets
+install -d -o root -g root -m 0755 /opt/qrpc/rel
 ./pkg_add -u qrpc-prod-*.tgz
 cat > /opt/qrpc/pkg/etc/ca-certificates-dir.conf << EOF
 ETCCERTSDIR=/opt/qrpc/pkg/etc/openssl/certs
