@@ -1,0 +1,4 @@
+target/
+voicevox_core/
+download*
+*.wav

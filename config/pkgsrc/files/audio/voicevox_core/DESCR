@@ -1,0 +1,4 @@
+VOICEVOX Core runtime assets for Linux/x64 with CUDA support.
+This package automates downloading the ONNX Runtime bundle (CUDA
+providers), Open JTalk dictionary, and the full set of bundled VVM
+models using the official upstream downloader.

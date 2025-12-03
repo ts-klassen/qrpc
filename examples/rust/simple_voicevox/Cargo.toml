@@ -1,0 +1,7 @@
+[package]
+name = "simple_voicevox"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+voicevox_core = { git = "https://github.com/voicevox/voicevox_core.git", tag = "0.16.2", default-features = false, features = ["load-onnxruntime"] }

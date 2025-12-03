@@ -1,0 +1,5 @@
+$NetBSD$
+
+BLAKE2s (voicevox_core/download-linux-x64) = 763574fb1d790914ed675bf23f26e5bbea493c985c0a9eb3256a49db2a0c6711
+SHA512 (voicevox_core/download-linux-x64) = 47bb998eecaf254ad1788e72e813632706737265d036c3d2834bd7d585a76cdd528d7c608de13308be5f9449afe73e8137441b6e515250025ecab72b62be976b
+Size (voicevox_core/download-linux-x64) = 8562088 bytes
