@@ -100,7 +100,7 @@ case "$1" in
     mv "$prod" _pkgsrc/packages/qrpc-prod/qrpc.tgz
     cp config/pkgrc _pkgsrc/packages/qrpc-prod/.pkgrc
     cp config/foreground.sh _pkgsrc/packages/qrpc-prod/foreground.sh
-    cp config/qrpc.service _pkgsrc/packages/qrpc-prod/qrpc.service
+    cp -r config/system _pkgsrc/packages/qrpc-prod/system
     ./scripts/license_collector.sh gather _pkgsrc/packages/qrpc-prod qrpc.tgz
     echo '#!/bin/bash
         set -euo pipefail
