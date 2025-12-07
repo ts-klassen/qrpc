@@ -3,5 +3,3 @@
 +K true
 +A30
 
-## Restrict Erlang distribution to loopback only
--kernel inet_dist_use_interface {127,0,0,1}
