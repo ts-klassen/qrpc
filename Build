@@ -4,53 +4,96 @@ set -euo pipefail
 
 cd `dirname $0`
 
+CHROOT_DIR="_root"
+if [ "${IS_BUILD_SERVER:-}" = "1" ]; then
+  CHROOT_DIR="/"
+fi
+
+root_path() {
+  local rel="$1"
+  if [ "$CHROOT_DIR" = "/" ]; then
+    printf "/%s" "$rel"
+  else
+    printf "%s/%s" "$CHROOT_DIR" "$rel"
+  fi
+}
+
+chroot_cmd() {
+  if [ "$CHROOT_DIR" = "/" ]; then
+    sudo "$@"
+  else
+    sudo chroot "$CHROOT_DIR" "$@"
+  fi
+}
+
 case "$1" in
   bootstrap)
     ./Build unmount
-    sudo rm -rf _root
+    if [ "$CHROOT_DIR" != "/" ]; then
+      sudo rm -rf "$CHROOT_DIR"
+    fi
     sudo rm -rf /opt/qrpc/pkg
     sudo apt-get update --allow-releaseinfo-change
     sudo apt-get install -y debootstrap patch bindfs
-    sudo debootstrap --variant=minbase jammy _root http://archive.ubuntu.com/ubuntu/
-    sudo chmod 700 _root
-    sudo bash -c 'echo nameserver 8.8.8.8 >> _root/etc/resolv.conf'
-    sudo git clone --depth 1 https://github.com/NetBSD/pkgsrc.git _root/root/pkgsrc
-    sudo patch _root/root/pkgsrc/mk/defaults/mk.conf < config/mk.conf.patch
-    sudo bash -c 'echo >> _root/etc/bash.bashrc'
-    sudo bash -c 'echo '"'"'export PATH=/opt/qrpc/pkg/bin:$PATH'"'"' >> _root/etc/bash.bashrc'
-    sudo bash -c 'echo '"'"'export PATH=/opt/qrpc/pkg/sbin:$PATH'"'"' >> _root/etc/bash.bashrc'
-    sudo bash -c 'echo '"'"'export MANPATH=/opt/qrpc/pkg/man:$MANPATH'"'"' >> _root/etc/bash.bashrc'
-    sudo chroot _root /usr/bin/apt-get update
-    sudo chroot _root /usr/bin/apt-get install -y gcc g++ wget
+    if [ "$CHROOT_DIR" != "/" ]; then
+      sudo debootstrap --variant=minbase jammy "$CHROOT_DIR" http://archive.ubuntu.com/ubuntu/
+      sudo chmod 700 "$CHROOT_DIR"
+      sudo bash -c 'echo nameserver 8.8.8.8 >> '"$(root_path "etc/resolv.conf")"
+    fi
+    if [ -d "$(root_path "root/pkgsrc")/.git" ]; then
+      sudo git -C "$(root_path "root/pkgsrc")" fetch --depth 1 origin
+      sudo git -C "$(root_path "root/pkgsrc")" reset --hard origin/HEAD
+    else
+      sudo git clone --depth 1 https://github.com/NetBSD/pkgsrc.git "$(root_path "root/pkgsrc")"
+    fi
+    sudo patch "$(root_path "root/pkgsrc/mk/defaults/mk.conf")" < config/mk.conf.patch
+    sudo bash -c 'echo >> '"$(root_path "etc/bash.bashrc")"
+    sudo bash -c 'echo '"'"'export PATH=/opt/qrpc/pkg/bin:$PATH'"'"' >> '"$(root_path "etc/bash.bashrc")"
+    sudo bash -c 'echo '"'"'export PATH=/opt/qrpc/pkg/sbin:$PATH'"'"' >> '"$(root_path "etc/bash.bashrc")"
+    sudo bash -c 'echo '"'"'export MANPATH=/opt/qrpc/pkg/man:$MANPATH'"'"' >> '"$(root_path "etc/bash.bashrc")"
+    chroot_cmd /usr/bin/apt-get update
+    chroot_cmd /usr/bin/apt-get install -y gcc g++ wget
     ./Build mount
-    sudo chroot _root /usr/bin/bash -ilc 'cd /root/pkgsrc/bootstrap && ./bootstrap --prefix /opt/qrpc/pkg --pkgdbdir /opt/qrpc/pkg/pkgdb --sysconfdir /opt/qrpc/pkg/etc --varbase /opt/qrpc/var'
+    chroot_cmd /usr/bin/bash -ilc 'cd /root/pkgsrc/bootstrap && ./bootstrap --prefix /opt/qrpc/pkg --pkgdbdir /opt/qrpc/pkg/pkgdb --sysconfdir /opt/qrpc/pkg/etc --varbase /opt/qrpc/var'
     ;;
   unmount)
     if sudo mountpoint -q _pkgsrc; then
       sudo umount _pkgsrc || sudo umount -l _pkgsrc || true
     fi
-    if sudo mountpoint -q _root/opt/qrpc; then
-      sudo umount _root/opt/qrpc || sudo umount -l _root/opt/qrpc || true
+    if [ "$CHROOT_DIR" = "/" ]; then
+      exit 0
     fi
-    if sudo mountpoint -q _root/proc; then
-      sudo umount _root/proc || sudo umount -l _root/proc || true
+    if sudo mountpoint -q "$(root_path "opt/qrpc")"; then
+      sudo umount "$(root_path "opt/qrpc")" || sudo umount -l "$(root_path "opt/qrpc")" || true
+    fi
+    if sudo mountpoint -q "$(root_path "proc")"; then
+      sudo umount "$(root_path "proc")" || sudo umount -l "$(root_path "proc")" || true
     fi
     ;;
   mount)
-    sudo mkdir -p _root/proc
-    if ! sudo mountpoint -q _root/proc; then
-      sudo mount -t proc proc _root/proc
+    if [ "$CHROOT_DIR" = "/" ]; then
+      if ! sudo mountpoint -q _pkgsrc; then
+        MAIN_USER=$USER;
+        sudo mkdir -p "$(root_path "root/pkgsrc")"
+        mkdir -p _pkgsrc
+        sudo bindfs --map=root/$MAIN_USER:@root/@$MAIN_USER "$(root_path "root/pkgsrc")" _pkgsrc
+      fi
+      exit 0
     fi
-    if ! sudo mountpoint -q _root/opt/qrpc; then
+    sudo mkdir -p "$(root_path "proc")"
+    if ! sudo mountpoint -q "$(root_path "proc")"; then
+      sudo mount -t proc proc "$(root_path "proc")"
+    fi
+    if ! sudo mountpoint -q "$(root_path "opt/qrpc")"; then
       sudo mkdir -p /opt/qrpc
-      sudo mkdir -p _root/opt/qrpc
-      sudo mount --bind /opt/qrpc _root/opt/qrpc
+      sudo mkdir -p "$(root_path "opt/qrpc")"
+      sudo mount --bind /opt/qrpc "$(root_path "opt/qrpc")"
     fi
     if ! sudo mountpoint -q _pkgsrc; then
       MAIN_USER=$USER;
-      sudo mkdir -p _root/root/pkgsrc
+      sudo mkdir -p "$(root_path "root/pkgsrc")"
       mkdir -p _pkgsrc
-      sudo bindfs --map=root/$MAIN_USER:@root/@$MAIN_USER _root/root/pkgsrc _pkgsrc
+      sudo bindfs --map=root/$MAIN_USER:@root/@$MAIN_USER "$(root_path "root/pkgsrc")" _pkgsrc
     fi
     ;;
   devel)
@@ -67,10 +110,10 @@ case "$1" in
       fi
       patch -d _pkgsrc -p0 -N < "$patch"
     done
-    sudo chroot _root /usr/bin/bash -ilc 'cd /root/pkgsrc/meta-pkgs/qrpc-devel && bmake update'
+    chroot_cmd /usr/bin/bash -ilc 'cd /root/pkgsrc/meta-pkgs/qrpc-devel && bmake update'
     ;;
   root)
-    sudo chroot _root /usr/bin/bash
+    chroot_cmd /usr/bin/bash
     ;;
   clean)
     export PATH=/opt/qrpc/pkg/bin:$PATH
@@ -92,9 +135,9 @@ case "$1" in
     export PATH=/opt/qrpc/pkg/bin:$PATH
     rm -rf _pkgsrc/packages/qrpc-prod
     mkdir -p _pkgsrc/packages/qrpc-prod
-    sudo chroot _root /usr/bin/bash -ilc 'cd /root/pkgsrc/meta-pkgs/qrpc-prod && bmake update'
-    sudo chroot _root /opt/qrpc/pkg/bin/pkg_tarup -d /root/pkgsrc/packages/qrpc-prod -a qrpc-prod
-    sudo chroot _root cp -p /opt/qrpc/pkg/sbin/pkg_add /root/pkgsrc/packages/qrpc-prod/.
+    chroot_cmd /usr/bin/bash -ilc 'cd /root/pkgsrc/meta-pkgs/qrpc-prod && bmake update'
+    chroot_cmd /opt/qrpc/pkg/bin/pkg_tarup -d /root/pkgsrc/packages/qrpc-prod -a qrpc-prod
+    chroot_cmd cp -p /opt/qrpc/pkg/sbin/pkg_add /root/pkgsrc/packages/qrpc-prod/.
     rebar3 as prod tar
     prod=$(ls -t _build/prod/rel/qrpc/*.tar.gz | head -1)
     mv "$prod" _pkgsrc/packages/qrpc-prod/qrpc.tgz
@@ -122,9 +165,9 @@ case "$1" in
     export PATH=/opt/qrpc/pkg/bin:$PATH
     rm -rf _pkgsrc/packages/qrpc-devel
     mkdir -p _pkgsrc/packages/qrpc-devel
-    sudo chroot _root /usr/bin/bash -ilc 'cd /root/pkgsrc/meta-pkgs/qrpc-devel && bmake update'
-    sudo chroot _root /opt/qrpc/pkg/bin/pkg_tarup -d /root/pkgsrc/packages/qrpc-devel -a qrpc-devel
-    sudo chroot _root cp -p /opt/qrpc/pkg/sbin/pkg_add /root/pkgsrc/packages/qrpc-devel/.
+    chroot_cmd /usr/bin/bash -ilc 'cd /root/pkgsrc/meta-pkgs/qrpc-devel && bmake update'
+    chroot_cmd /opt/qrpc/pkg/bin/pkg_tarup -d /root/pkgsrc/packages/qrpc-devel -a qrpc-devel
+    chroot_cmd cp -p /opt/qrpc/pkg/sbin/pkg_add /root/pkgsrc/packages/qrpc-devel/.
     # make tar just to find out version number and collect license
     rebar3 as prod tar
     prod=$(ls -t _build/prod/rel/qrpc/*.tar.gz | head -1)
