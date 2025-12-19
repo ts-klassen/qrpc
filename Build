@@ -118,6 +118,43 @@ case "$1" in
     cd ..
     echo "_release_packages/${name}.tar.gz"
     ;;
+  package-devel)
+    export PATH=/opt/qrpc/pkg/bin:$PATH
+    rm -rf _pkgsrc/packages/qrpc-devel
+    mkdir -p _pkgsrc/packages/qrpc-devel
+    sudo chroot _root /usr/bin/bash -ilc 'cd /root/pkgsrc/meta-pkgs/qrpc-devel && bmake update'
+    sudo chroot _root /opt/qrpc/pkg/bin/pkg_tarup -d /root/pkgsrc/packages/qrpc-devel -a qrpc-devel
+    sudo chroot _root cp -p /opt/qrpc/pkg/sbin/pkg_add /root/pkgsrc/packages/qrpc-devel/.
+    # make tar just to find out version number and collect license
+    rebar3 as prod tar
+    prod=$(ls -t _build/prod/rel/qrpc/*.tar.gz | head -1)
+    mv "$prod" _pkgsrc/packages/qrpc-devel/qrpc.tgz
+    ./scripts/license_collector.sh gather _pkgsrc/packages/qrpc-devel qrpc.tgz
+    echo '#!/bin/bash
+set -euo pipefail
+cd $(dirname $0)
+install -d -o root -g root -m 0755 /opt/qrpc
+install -d -o root -g root -m 0755 /opt/qrpc/pkg
+install -d -o root -g root -m 0755 /opt/qrpc/pkg/etc
+./pkg_add -u qrpc-*.tgz
+cat > /opt/qrpc/pkg/etc/ca-certificates-dir.conf << EOF
+ETCCERTSDIR=/opt/qrpc/pkg/etc/openssl/certs
+EOF
+mkdir -p /opt/qrpc/pkg/etc/openssl/certs
+/opt/qrpc/pkg/sbin/update-ca-certificates
+echo INSTALL COMPLETE
+' > _pkgsrc/packages/qrpc-devel/install.sh
+    chmod +x _pkgsrc/packages/qrpc-devel/install.sh
+    name="$(basename "${prod%.tar.gz}")-$(rustc -Vv | sed -n 's/^host: //p')-devel"
+    mkdir -p _release_packages
+    mv _pkgsrc/packages/qrpc-devel "_release_packages/${name}"
+    cd _release_packages
+    tar -zcf "${name}.tar.gz" "$name"
+    rm -rf devel-latest
+    mv "$name" devel-latest
+    cd ..
+    echo "_release_packages/${name}.tar.gz"
+    ;;
   install)
     export PATH=/opt/qrpc/pkg/bin:$PATH
     ./Build package
