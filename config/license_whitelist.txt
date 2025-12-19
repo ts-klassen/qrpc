@@ -1,0 +1,3 @@
+# Packages allowed to ship without a license declaration.
+# One entry per line; matches PKGNAME, PKGBASE, or the package ref.
+pkg_tarup

@@ -10,6 +10,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 : "${PKG_INFO:=/opt/qrpc/pkg/sbin/pkg_info}"
 : "${PKGSRC_LICENSE_DIR:=${REPO_ROOT}/_pkgsrc/licenses}"
+: "${PKGSRC_LICENSE_WHITELIST:=${REPO_ROOT}/config/license_whitelist.txt}"
 
 warn() {
   printf 'license_collector warning: %s\n' "$*" >&2
@@ -45,13 +46,32 @@ copy_license_token() {
   cp "$src" "${dest_dir}/${filename_prefix}-${token}.LICENSE"
 }
 
+license_whitelisted() {
+  local pkg_ref="$1"
+  local pkgname="$2"
+  local pkgbase="$3"
+  local whitelist="${PKGSRC_LICENSE_WHITELIST}"
+
+  [ -f "$whitelist" ] || return 1
+  while IFS= read -r line; do
+    line="${line%%#*}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [ -n "$line" ] || continue
+    if [ "$line" = "$pkg_ref" ] || [ "$line" = "$pkgname" ] || { [ -n "$pkgbase" ] && [ "$line" = "$pkgbase" ]; }; then
+      return 0
+    fi
+  done < "$whitelist"
+  return 1
+}
+
 collect_pkg_license() {
   local label="$1"
   local pkg_ref="$2"
   local dest_dir="$3"
   local notice_array_name="$4"
 
-  local spec pkgname
+  local spec pkgname pkgbase
   if [ ! -x "$PKG_INFO" ]; then
     warn "pkg_info tool not executable at ${PKG_INFO}; skipping ${pkg_ref}"
     eval "${notice_array_name}+=(\"${label}: UNKNOWN\")"
@@ -59,11 +79,19 @@ collect_pkg_license() {
   fi
   spec="$("$PKG_INFO" -Q LICENSE "$pkg_ref" 2>/dev/null || true)"
   pkgname="$("$PKG_INFO" -Q PKGNAME "$pkg_ref" 2>/dev/null || true)"
+  pkgbase="$("$PKG_INFO" -Q PKGBASE "$pkg_ref" 2>/dev/null || true)"
   if [ -z "$pkgname" ]; then
     pkgname="$pkg_ref"
   fi
+  if [ -z "$pkgbase" ]; then
+    pkgbase="${pkgname%-*}"
+  fi
 
   if [ -z "$spec" ]; then
+    if license_whitelisted "$pkg_ref" "$pkgname" "$pkgbase"; then
+      eval "${notice_array_name}+=(\"${label}: NO-LICENSE (whitelisted)\")"
+      return 0
+    fi
     warn "unable to determine LICENSE for ${pkg_ref}"
     eval "${notice_array_name}+=(\"${label}: UNKNOWN\")"
     return 1

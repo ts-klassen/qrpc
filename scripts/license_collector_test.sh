@@ -33,4 +33,12 @@ if [ "$tokens_output" != "$expected_tokens" ]; then
   exit 1
 fi
 
+whitelist_file="${tmpdir}/license_whitelist.txt"
+printf 'pkg_tarup\n' > "$whitelist_file"
+export PKGSRC_LICENSE_WHITELIST="$whitelist_file"
+if ! license_whitelisted "pkg_tarup-1.9.1" "pkg_tarup-1.9.1" "pkg_tarup"; then
+  echo "FAIL: whitelist did not match pkg_tarup"
+  exit 1
+fi
+
 echo "license_collector tests passed"
