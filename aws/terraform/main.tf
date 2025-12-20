@@ -577,7 +577,7 @@ resource "aws_iam_role_policy" "github_actions" {
           "ssm:SendCommand",
           "ssm:GetCommandInvocation"
         ],
-        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:document/AWS-RunShellScript"
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:document/AWS-RunShellScript"
       },
       {
         Effect = "Allow",
@@ -585,7 +585,7 @@ resource "aws_iam_role_policy" "github_actions" {
           "ssm:SendCommand",
           "ssm:GetCommandInvocation"
         ],
-        Resource = "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:instance/*",
+        Resource = "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
         Condition = {
           StringEquals = {
             "ssm:resourceTag/Project" = var.project_name
@@ -614,7 +614,7 @@ resource "aws_iam_role_policy" "github_actions" {
       {
         Effect = "Allow",
         Action = "ec2:CreateTags",
-        Resource = "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:instance/*",
+        Resource = "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
         Condition = {
           StringEquals = {
             "ec2:CreateAction" = "RunInstances",
@@ -634,7 +634,7 @@ resource "aws_iam_role_policy" "github_actions" {
       {
         Effect = "Allow",
         Action = "ec2:TerminateInstances",
-        Resource = "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:instance/*",
+        Resource = "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
         Condition = {
           StringEquals = {
             "ec2:ResourceTag/Project" = var.project_name
