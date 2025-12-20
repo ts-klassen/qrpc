@@ -54,6 +54,34 @@ aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANC
 aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
 ```
 
+## 4.5) Poll stdout/stderr while running (optional)
+This is useful to confirm progress during a manual test. The output is not streaming,
+so we re-fetch it every few seconds and tail the last lines.
+
+stdout:
+```bash
+while true; do
+  aws ssm get-command-invocation \
+    --command-id "$COMMAND_ID" \
+    --instance-id "$INSTANCE_ID" \
+    --query 'StandardOutputContent' \
+    --output text | tail -n 50
+  sleep 5
+done
+```
+
+stderr:
+```bash
+while true; do
+  aws ssm get-command-invocation \
+    --command-id "$COMMAND_ID" \
+    --instance-id "$INSTANCE_ID" \
+    --query 'StandardErrorContent' \
+    --output text | tail -n 50
+  sleep 5
+done
+```
+
 ## 5) Verify S3 uploads
 ```bash
 aws s3 ls "s3://$BUILD_BUCKET/"

@@ -52,7 +52,7 @@ export QRPC_BUILD_SERVER=1
 ./Build bootstrap
 previous_devel_key="$(aws s3api list-objects-v2 \
   --bucket "$S3_BUCKET" \
-  --query "Contents[?ends_with(Key, '-devel.tar.gz')]|sort_by(@,&LastModified)[-1].Key" \
+  --query "Contents[?contains(Key, '${expected_arch}') && contains(Key, 'ubuntu${expected_version}') && ends_with(Key, '-devel.tar.gz')]|sort_by(@,&LastModified)[-1].Key" \
   --output text 2>/dev/null || true)"
 
 if [ -n "$previous_devel_key" ] && [ "$previous_devel_key" != "None" ]; then
