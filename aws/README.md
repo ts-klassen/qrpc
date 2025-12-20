@@ -4,6 +4,8 @@ This directory provisions the EC2 build server, S3 bucket, and CloudFront distri
 
 ## What it does
 - EC2 build server pinned to Ubuntu 22.04 (Jammy) with kernel 5.15.0 on x86_64.
+- CloudWatch Logs group for build output and SNS email notifications on build start/finish.
+- Scheduled TTL cleanup via Lambda for expired build instances.
 - S3 bucket to store release artifacts.
 - CloudFront distribution to serve artifacts over HTTPS.
 - Image Builder creates a golden AMI from the oldest matching Ubuntu 22.04 base.
@@ -16,7 +18,8 @@ From `aws/terraform`:
 terraform init
 terraform apply \
   -var="github_repository=YOUR_ORG/YOUR_REPO" \
-  -var="aws_region=us-east-1"
+  -var="aws_region=us-east-1" \
+  -var="notification_email=you@example.com"
 ```
 
 Optional variables you may want to set:
@@ -25,6 +28,8 @@ Optional variables you may want to set:
 - `key_name` for SSH access.
 - `ami_name` to pin a specific Ubuntu 22.04 AMI name.
 - `ami_name_regex` to control which AMIs are considered for auto-selection.
+- `log_group_name` to override the CloudWatch Logs group (default `/qrpc/build`).
+- `ssm_document_name` to override the SSM document name (default `qrpc_build_run_shell`).
 
 ## GitHub Actions secrets
 Add these secrets to the repository:
@@ -32,6 +37,8 @@ Add these secrets to the repository:
 - `AWS_REGION`: the same region used by Terraform.
 - `AWS_BUILD_BUCKET`: output `release_bucket_name` from Terraform.
 - `AWS_BUILD_LAUNCH_TEMPLATE_ID`: output `build_launch_template_id` from Terraform.
+If you override the log group name, update the workflow to match.
+The workflow uses a custom SSM document named `qrpc_build_run_shell` by default.
 
 ## Release flow
 1. Push a tag that points to a commit on `main`.
@@ -47,5 +54,6 @@ Add these secrets to the repository:
 - The build script is installed on each EC2 instance at `/opt/qrpc-build/build_package.sh`, so GitHub Actions does not need S3 access.
 - The SSM script uses the repo tag directly; if the repository is private, ensure the instance can access it (e.g., via a deploy key or a mirror in the same VPC).
 - The workflow tags instances with `Project=qrpc-build-server`; if you change `project_name` in Terraform, update the workflow tag to match.
+- The SNS topic sends a subscription confirmation email on first apply; confirm it before notifications are delivered.
 - Before running `./Build devel`, the build script pulls the most recent devel tarball from S3 and runs its `install.sh` to avoid rebuilding unchanged packages.
 - Image Builder runs only when Terraform applies; the AMI is not refreshed automatically.

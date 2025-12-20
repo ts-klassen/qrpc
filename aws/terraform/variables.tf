@@ -69,6 +69,23 @@ variable "github_oidc_thumbprint" {
   default     = "6938fd4d98bab03faadb97b34396831e3780aea1"
 }
 
+variable "notification_email" {
+  type        = string
+  description = "Email address to receive build start/finish notifications."
+}
+
+variable "log_group_name" {
+  type        = string
+  description = "CloudWatch Log Group name for build output."
+  default     = "/qrpc/build"
+}
+
+variable "ssm_document_name" {
+  type        = string
+  description = "SSM document name for build commands."
+  default     = "qrpc_build_run_shell"
+}
+
 variable "tags" {
   type        = map(string)
   description = "Common tags applied to resources."

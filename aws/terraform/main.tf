@@ -57,6 +57,23 @@ locals {
   ubuntu_base_ami_id = var.ami_name != "" ? data.aws_ami.ubuntu_jammy_exact[0].id : data.aws_ami_ids.ubuntu_jammy_auto.ids[0]
 }
 
+resource "aws_cloudwatch_log_group" "build" {
+  name              = var.log_group_name
+  retention_in_days = 28
+  tags              = var.tags
+}
+
+resource "aws_sns_topic" "build_notify" {
+  name = "${var.project_name}-build-notify"
+  tags = var.tags
+}
+
+resource "aws_sns_topic_subscription" "build_notify_email" {
+  topic_arn = aws_sns_topic.build_notify.arn
+  protocol  = "email"
+  endpoint  = var.notification_email
+}
+
 resource "aws_s3_bucket" "releases" {
   bucket        = local.bucket_name
   bucket_prefix = local.bucket_name == null ? "${var.project_name}-releases-" : null
@@ -231,6 +248,29 @@ resource "aws_iam_role_policy" "build_s3" {
           "s3:GetObject"
         ],
         Resource = "${aws_s3_bucket.releases.arn}/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "build_self_terminate" {
+  name = "${var.project_name}-build-self-terminate"
+  role = aws_iam_role.build_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "ec2:TerminateInstances"
+        ],
+        Resource = "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
+        Condition = {
+          StringEquals = {
+            "ec2:ResourceTag/Project" = var.project_name
+          }
+        }
       }
     ]
   })
@@ -428,6 +468,30 @@ resource "aws_launch_template" "build" {
     #!/usr/bin/env bash
     set -euo pipefail
 
+    self_terminate() {
+      if ! command -v aws >/dev/null 2>&1; then
+        return
+      fi
+
+      token="$$(curl -sS -m 3 -X PUT "http://169.254.169.254/latest/api/token" \\
+        -H "X-aws-ec2-metadata-token-ttl-seconds: 300" || true)"
+      if [ -z "$${token:-}" ]; then
+        return
+      fi
+
+      instance_id="$$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $$token" \\
+        "http://169.254.169.254/latest/meta-data/instance-id" || true)"
+      region="$$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $$token" \\
+        "http://169.254.169.254/latest/dynamic/instance-identity/document" \\
+        | sed -n 's/.*"region"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')"
+
+      if [ -n "$$instance_id" ] && [ -n "$$region" ]; then
+        aws ec2 terminate-instances --region "$$region" --instance-ids "$$instance_id" >/dev/null 2>&1 || true
+      fi
+    }
+
+    trap self_terminate EXIT
+
     usage() {
       echo "Usage: $0 <repo_url> <tag> <s3_bucket> <s3_prefix_unused>" >&2
     }
@@ -532,10 +596,190 @@ resource "aws_launch_template" "build" {
   tags = var.tags
 }
 
+resource "aws_cloudwatch_event_rule" "ssm_command_start" {
+  name = "${var.project_name}-ssm-command-start"
+  event_pattern = jsonencode({
+    source      = ["aws.ssm"],
+    "detail-type" = ["EC2 Command Status-change Notification"],
+    detail = {
+      "document-name" = [aws_ssm_document.build_run_shell.name],
+      status = ["InProgress"]
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_rule" "ssm_command_finish" {
+  name = "${var.project_name}-ssm-command-finish"
+  event_pattern = jsonencode({
+    source      = ["aws.ssm"],
+    "detail-type" = ["EC2 Command Status-change Notification"],
+    detail = {
+      "document-name" = [aws_ssm_document.build_run_shell.name],
+      status = ["Success", "Failed", "TimedOut", "Cancelled"]
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "ssm_command_start_sns" {
+  rule = aws_cloudwatch_event_rule.ssm_command_start.name
+  arn  = aws_sns_topic.build_notify.arn
+}
+
+resource "aws_cloudwatch_event_target" "ssm_command_finish_sns" {
+  rule = aws_cloudwatch_event_rule.ssm_command_finish.name
+  arn  = aws_sns_topic.build_notify.arn
+}
+
+resource "aws_sns_topic_policy" "build_notify" {
+  arn = aws_sns_topic.build_notify.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Sid       = "AllowEventBridgePublish",
+        Effect    = "Allow",
+        Principal = { Service = "events.amazonaws.com" },
+        Action    = "sns:Publish",
+        Resource  = aws_sns_topic.build_notify.arn,
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = [
+              aws_cloudwatch_event_rule.ssm_command_start.arn,
+              aws_cloudwatch_event_rule.ssm_command_finish.arn
+            ]
+          }
+        }
+      }
+    ]
+  })
+}
+
+data "archive_file" "ttl_cleanup" {
+  type        = "zip"
+  source_file = "${path.module}/lambda/ttl_cleanup.py"
+  output_path = "${path.module}/lambda/ttl_cleanup.zip"
+}
+
+resource "aws_iam_role" "ttl_cleanup_lambda" {
+  name = "${var.project_name}-ttl-cleanup"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        },
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "ttl_cleanup_lambda_logs" {
+  role       = aws_iam_role.ttl_cleanup_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "ttl_cleanup_lambda_ec2" {
+  name = "${var.project_name}-ttl-cleanup-ec2"
+  role = aws_iam_role.ttl_cleanup_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "ec2:DescribeInstances"
+        ],
+        Resource = "*"
+      },
+      {
+        Effect = "Allow",
+        Action = [
+          "ec2:TerminateInstances"
+        ],
+        Resource = "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
+        Condition = {
+          StringEquals = {
+            "ec2:ResourceTag/Project" = var.project_name
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_lambda_function" "ttl_cleanup" {
+  function_name    = "${var.project_name}-ttl-cleanup"
+  role             = aws_iam_role.ttl_cleanup_lambda.arn
+  handler          = "ttl_cleanup.handler"
+  runtime          = "python3.11"
+  filename         = data.archive_file.ttl_cleanup.output_path
+  source_code_hash = data.archive_file.ttl_cleanup.output_base64sha256
+  timeout          = 60
+
+  environment {
+    variables = {
+      PROJECT_TAG     = var.project_name
+      PROJECT_TAG_KEY = "Project"
+      EXPIRES_AT_TAG  = "ExpiresAt"
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_event_rule" "ttl_cleanup_schedule" {
+  name                = "${var.project_name}-ttl-cleanup"
+  schedule_expression = "rate(1 hour)"
+}
+
+resource "aws_cloudwatch_event_target" "ttl_cleanup_lambda" {
+  rule = aws_cloudwatch_event_rule.ttl_cleanup_schedule.name
+  arn  = aws_lambda_function.ttl_cleanup.arn
+}
+
+resource "aws_lambda_permission" "ttl_cleanup" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.ttl_cleanup.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.ttl_cleanup_schedule.arn
+}
+
 resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = [var.github_oidc_thumbprint]
+}
+
+resource "aws_ssm_document" "build_run_shell" {
+  name            = var.ssm_document_name
+  document_type   = "Command"
+  document_format = "YAML"
+
+  content = <<-DOC
+    schemaVersion: "2.2"
+    description: Run qrpc build command
+    parameters:
+      commands:
+        type: StringList
+        description: Commands to run
+        default: []
+    mainSteps:
+      - action: aws:runShellScript
+        name: runShellScript
+        inputs:
+          runCommand: "{{ commands }}"
+  DOC
+
+  tags = var.tags
 }
 
 resource "aws_iam_role" "github_actions" {
@@ -578,7 +822,10 @@ resource "aws_iam_role_policy" "github_actions" {
           "ssm:SendCommand",
           "ssm:GetCommandInvocation"
         ],
-        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:document/AWS-RunShellScript"
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:document/AWS-RunShellScript",
+          aws_ssm_document.build_run_shell.arn
+        ]
       },
       {
         Effect = "Allow",
@@ -627,7 +874,8 @@ resource "aws_iam_role_policy" "github_actions" {
               "Name",
               "GitHubRun",
               "Repo",
-              "Tag"
+              "Tag",
+              "ExpiresAt"
             ]
           }
         }

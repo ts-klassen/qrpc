@@ -13,7 +13,9 @@ terraform apply -var="github_repository=YOUR_ORG/YOUR_REPO" -var="aws_region=us-
 export AWS_REGION=us-east-1
 export LAUNCH_TEMPLATE_ID="$(terraform output -raw build_launch_template_id)"
 export BUILD_BUCKET="$(terraform output -raw release_bucket_name)"
+export LOG_GROUP="$(terraform output -raw build_log_group_name)"
 export PROJECT_TAG="qrpc-build-server"
+export DOCUMENT_NAME="qrpc_build_run_shell"
 ```
 
 Note: Terraform now auto-selects the oldest matching Ubuntu 22.04 AMI and
@@ -25,7 +27,7 @@ to change the selection filter.
 ```bash
 INSTANCE_ID=$(aws ec2 run-instances \
   --launch-template "LaunchTemplateId=$LAUNCH_TEMPLATE_ID" \
-  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=qrpc-build-server},{Key=Project,Value=$PROJECT_TAG},{Key=ManualTest,Value=true}]" \
+  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=qrpc-build-server},{Key=Project,Value=$PROJECT_TAG},{Key=ManualTest,Value=true},{Key=ExpiresAt,Value=$(date -u -d '+24 hours' '+%Y-%m-%dT%H:%M:%SZ')}]" \
   --query "Instances[0].InstanceId" \
   --output text)
 
@@ -37,11 +39,13 @@ aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
 ```bash
 REPO_URL="https://github.com/YOUR_ORG/YOUR_REPO.git"
 TAG="vX.Y.Z"
+REMOTE_CMD="nohup /opt/qrpc-build/build_package.sh \"$REPO_URL\" \"$TAG\" \"$BUILD_BUCKET\" \"unused\" > /var/log/qrpc-build.log 2>&1 & pid=\$!; echo \"Started build PID \$pid\"; tail -n +1 -F --pid=\$pid /var/log/qrpc-build.log"
 COMMAND_ID=$(aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
-  --document-name "AWS-RunShellScript" \
+  --document-name "$DOCUMENT_NAME" \
   --comment "Manual build test for $TAG" \
-  --parameters commands="[/opt/qrpc-build/build_package.sh '$REPO_URL' '$TAG' '$BUILD_BUCKET' 'unused']" \
+  --cloud-watch-output-config "CloudWatchOutputEnabled=true,CloudWatchLogGroupName=$LOG_GROUP" \
+  --parameters commands="$REMOTE_CMD" \
   --query "Command.CommandId" \
   --output text)
 
@@ -53,10 +57,11 @@ aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANC
 ```bash
 aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
 ```
+CloudWatch Logs are streamed to the log group (default `/qrpc/build`).
 
 ## 4.5) Poll stdout/stderr while running (optional)
-This is useful to confirm progress during a manual test. The output is not streaming,
-so we re-fetch it every few seconds and tail the last lines.
+This is useful to confirm progress during a manual test. We re-fetch it every few
+seconds and tail the last lines.
 
 stdout:
 ```bash
@@ -88,6 +93,7 @@ aws s3 ls "s3://$BUILD_BUCKET/"
 ```
 
 ## 6) Terminate instance (and delete its root volume)
+The instance will self-terminate after the build. Use this only if you need to clean up manually.
 ```bash
 aws ec2 terminate-instances --instance-ids "$INSTANCE_ID"
 aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID"
