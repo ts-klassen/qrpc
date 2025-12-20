@@ -36,6 +36,13 @@ Add these secrets to the repository:
 - `AWS_REGION`: the same region used by Terraform.
 - `AWS_BUILD_LAUNCH_TEMPLATE_ID`: output `build_launch_template_id` from Terraform.
 
+To fetch the role ARN:
+
+```bash
+cd aws/terraform
+terraform output -raw github_actions_role_arn
+```
+
 ## Release flow
 1. Push a tag that points to a commit on `main`.
 2. The workflow launches an EC2 instance from the launch template.
