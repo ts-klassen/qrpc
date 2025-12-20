@@ -16,9 +16,10 @@ export BUILD_BUCKET="$(terraform output -raw release_bucket_name)"
 export PROJECT_TAG="qrpc-build-server"
 ```
 
-Note: Terraform now auto-selects the oldest matching Ubuntu 22.04 AMI by
-default. Use `ami_name` to pin a specific image or `ami_name_regex` to change
-the selection filter.
+Note: Terraform now auto-selects the oldest matching Ubuntu 22.04 AMI and
+builds a golden AMI with Image Builder. This can add several minutes to
+`terraform apply`. Use `ami_name` to pin a specific image or `ami_name_regex`
+to change the selection filter.
 
 ## 2) Launch an instance from the launch template
 ```bash

@@ -13,6 +13,11 @@ output "build_launch_template_id" {
   description = "Launch template ID for ephemeral build instances."
 }
 
+output "build_ami_id" {
+  value       = aws_imagebuilder_image.build.output_resources[0].amis[0].image
+  description = "AMI ID created by Image Builder for build instances."
+}
+
 output "github_actions_role_arn" {
   value       = aws_iam_role.github_actions.arn
   description = "IAM role to assume from GitHub Actions via OIDC."

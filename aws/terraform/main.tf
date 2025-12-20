@@ -54,9 +54,8 @@ locals {
 }
 
 locals {
-  ubuntu_ami_id = var.ami_name != "" ?
-    data.aws_ami.ubuntu_jammy_exact[0].id :
-    data.aws_ami_ids.ubuntu_jammy_auto.ids[0]
+  ubuntu_base_ami_id = var.ami_name != "" ? data.aws_ami.ubuntu_jammy_exact[0].id :
+  data.aws_ami_ids.ubuntu_jammy_auto.ids[0]
 }
 
 resource "aws_s3_bucket" "releases" {
@@ -230,7 +229,6 @@ resource "aws_iam_role_policy" "build_s3" {
       {
         Effect = "Allow",
         Action = [
-          "s3:DeleteObject",
           "s3:GetObject"
         ],
         Resource = "${aws_s3_bucket.releases.arn}/*"
@@ -244,9 +242,125 @@ resource "aws_iam_instance_profile" "build" {
   role = aws_iam_role.build_instance.name
 }
 
+resource "aws_iam_service_linked_role" "imagebuilder" {
+  aws_service_name = "imagebuilder.amazonaws.com"
+}
+
+resource "aws_iam_role" "imagebuilder_instance" {
+  name = "${var.project_name}-imagebuilder-instance"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        },
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "imagebuilder_instance_core" {
+  role       = aws_iam_role.imagebuilder_instance.name
+  policy_arn = "arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder"
+}
+
+resource "aws_iam_role_policy_attachment" "imagebuilder_instance_ssm" {
+  role       = aws_iam_role.imagebuilder_instance.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "imagebuilder" {
+  name = "${var.project_name}-imagebuilder-profile"
+  role = aws_iam_role.imagebuilder_instance.name
+}
+
+resource "aws_imagebuilder_component" "base_noop" {
+  name     = "${var.project_name}-base"
+  platform = "Linux"
+  version  = "1.0.0"
+
+  data = <<-EOF
+    name: qrpc-base
+    description: No-op component for golden AMI.
+    schemaVersion: 1.0
+    phases:
+      - name: build
+        steps:
+          - name: noop
+            action: ExecuteBash
+            inputs:
+              commands:
+                - echo "qrpc base image"
+  EOF
+
+  tags = var.tags
+}
+
+resource "aws_imagebuilder_image_recipe" "build" {
+  name         = "${var.project_name}-image-recipe"
+  version      = "1.0.0"
+  parent_image = local.ubuntu_base_ami_id
+
+  component {
+    component_arn = aws_imagebuilder_component.base_noop.arn
+  }
+
+  tags = var.tags
+}
+
+resource "aws_imagebuilder_infrastructure_configuration" "build" {
+  name                          = "${var.project_name}-imagebuilder"
+  instance_profile_name         = aws_iam_instance_profile.imagebuilder.name
+  subnet_id                     = local.subnet_id
+  security_group_ids            = [aws_security_group.build.id]
+  terminate_instance_on_failure = true
+  description                   = "Golden AMI build for ${var.project_name}"
+
+  tags = var.tags
+}
+
+resource "aws_imagebuilder_distribution_configuration" "build" {
+  name = "${var.project_name}-distribution"
+
+  distribution {
+    region = data.aws_region.current.name
+
+    ami_distribution_configuration {
+      name = "${var.project_name}-build-{{imagebuilder:buildDate}}"
+      ami_tags = merge(var.tags, {
+        Project     = var.project_name
+        BaseAmiId   = local.ubuntu_base_ami_id
+        ImageSource = "imagebuilder"
+      })
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_imagebuilder_image" "build" {
+  image_recipe_arn                 = aws_imagebuilder_image_recipe.build.arn
+  infrastructure_configuration_arn = aws_imagebuilder_infrastructure_configuration.build.arn
+  distribution_configuration_arn   = aws_imagebuilder_distribution_configuration.build.arn
+
+  tags = var.tags
+
+  depends_on = [aws_iam_service_linked_role.imagebuilder]
+}
+
+locals {
+  build_ami_id = aws_imagebuilder_image.build.output_resources[0].amis[0].image
+}
+
 resource "aws_launch_template" "build" {
   name_prefix   = "${var.project_name}-build-"
-  image_id      = local.ubuntu_ami_id
+  image_id      = local.build_ami_id
   instance_type = var.instance_type
   key_name      = var.key_name != "" ? var.key_name : null
 
@@ -506,6 +620,15 @@ resource "aws_iam_role_policy" "github_actions" {
           StringEquals = {
             "ec2:CreateAction" = "RunInstances",
             "aws:RequestTag/Project" = var.project_name
+          },
+          "ForAllValues:StringEquals" = {
+            "aws:TagKeys" = [
+              "Project",
+              "Name",
+              "GitHubRun",
+              "Repo",
+              "Tag"
+            ]
           }
         }
       },

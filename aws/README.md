@@ -6,6 +6,7 @@ This directory provisions the EC2 build server, S3 bucket, and CloudFront distri
 - EC2 build server pinned to Ubuntu 22.04 (Jammy) with kernel 5.15.0 on x86_64.
 - S3 bucket to store release artifacts.
 - CloudFront distribution to serve artifacts over HTTPS.
+- Image Builder creates a golden AMI from the oldest matching Ubuntu 22.04 base.
 - IAM roles for the EC2 instance and GitHub Actions OIDC.
 
 ## Terraform apply
@@ -47,3 +48,4 @@ Add these secrets to the repository:
 - The SSM script uses the repo tag directly; if the repository is private, ensure the instance can access it (e.g., via a deploy key or a mirror in the same VPC).
 - The workflow tags instances with `Project=qrpc-build-server`; if you change `project_name` in Terraform, update the workflow tag to match.
 - Before running `./Build devel`, the build script pulls the most recent devel tarball from S3 and runs its `install.sh` to avoid rebuilding unchanged packages.
+- Image Builder runs only when Terraform applies; the AMI is not refreshed automatically.
