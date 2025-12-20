@@ -972,7 +972,8 @@ resource "aws_iam_role_policy" "github_actions" {
         Condition = {
           StringEquals = {
             "ec2:LaunchTemplate" = aws_launch_template.build.arn,
-            "aws:RequestedRegion" = var.aws_region
+            "aws:RequestedRegion" = var.aws_region,
+            "aws:RequestTag/Project" = var.project_name
           }
         }
       },
