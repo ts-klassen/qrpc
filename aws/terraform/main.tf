@@ -512,16 +512,16 @@ resource "aws_launch_template" "build" {
         return
       fi
 
-      token="$(curl -sS -m 3 -X PUT "http://169.254.169.254/latest/api/token" \\
+      token="$(curl -sS -m 3 -X PUT "http://169.254.169.254/latest/api/token" \
         -H "X-aws-ec2-metadata-token-ttl-seconds: 300" || true)"
       if [ -z "$${token:-}" ]; then
         return
       fi
 
-      instance_id="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \\
+      instance_id="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \
         "http://169.254.169.254/latest/meta-data/instance-id" || true)"
-      region="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \\
-        "http://169.254.169.254/latest/dynamic/instance-identity/document" \\
+      region="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \
+        "http://169.254.169.254/latest/dynamic/instance-identity/document" \
         | sed -n 's/.*"region"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')"
 
       if [ -n "$instance_id" ] && [ -n "$region" ]; then
