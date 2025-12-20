@@ -6,7 +6,7 @@ This runs the same flow as GitHub Actions: launch an ephemeral EC2 instance from
 ```bash
 cd aws/terraform
 terraform init
-terraform apply -var="github_repository=YOUR_ORG/YOUR_REPO" -var="aws_region=us-east-1"
+terraform apply -var="github_repository=YOUR_ORG/YOUR_REPO" -var="aws_region=us-east-1" -var="notification_email=you@example.com"
 ```
 
 ```bash

@@ -4,7 +4,7 @@ This directory provisions the EC2 build server, S3 bucket, and CloudFront distri
 
 ## What it does
 - EC2 build server pinned to Ubuntu 22.04 (Jammy) with kernel 5.15.0 on x86_64.
-- CloudWatch Logs group for build output and SNS topic reserved for optional build notifications.
+- CloudWatch Logs group for build output and SNS topic for build start/finish notifications.
 - Scheduled TTL cleanup via Lambda for expired build instances.
 - S3 bucket to store release artifacts.
 - CloudFront distribution to serve artifacts over HTTPS.

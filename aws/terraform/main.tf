@@ -956,7 +956,12 @@ resource "aws_iam_role_policy" "github_actions" {
         Action = [
           "ec2:DescribeInstances"
         ],
-        Resource = "*"
+        Resource = "*",
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+          }
+        }
       },
       {
         Effect = "Allow",
@@ -966,7 +971,18 @@ resource "aws_iam_role_policy" "github_actions" {
         Resource = "*",
         Condition = {
           StringEquals = {
-            "ec2:LaunchTemplate" = aws_launch_template.build.arn
+            "ec2:LaunchTemplate" = aws_launch_template.build.arn,
+            "aws:RequestedRegion" = var.aws_region,
+            "aws:RequestTag/Project" = var.project_name
+          },
+          "ForAllValues:StringEquals" = {
+            "aws:TagKeys" = [
+              "Project",
+              "Name",
+              "GitHubRun",
+              "Tag",
+              "ExpiresAt"
+            ]
           }
         }
       },
@@ -977,7 +993,8 @@ resource "aws_iam_role_policy" "github_actions" {
         Condition = {
           StringEquals = {
             "ec2:CreateAction" = "RunInstances",
-            "aws:RequestTag/Project" = var.project_name
+            "aws:RequestTag/Project" = var.project_name,
+            "aws:RequestedRegion" = var.aws_region
           },
           "ForAllValues:StringEquals" = {
             "aws:TagKeys" = [
