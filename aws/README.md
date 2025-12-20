@@ -3,7 +3,7 @@
 This directory provisions the EC2 build server, S3 bucket, and CloudFront distribution needed to build and distribute release artifacts.
 
 ## What it does
-- EC2 build server pinned to Ubuntu 22.04 (Jammy) with kernel 5.15.0 on x86_64.
+- EC2 build server pinned to Ubuntu 22.04 (Jammy) with kernel 6.8.0 on x86_64.
 - CloudWatch Logs group for build output and SNS topic for build start/finish notifications.
 - Scheduled TTL cleanup via Lambda for expired build instances.
 - S3 bucket to store release artifacts.
@@ -53,7 +53,7 @@ terraform output -raw github_actions_role_arn
 7. CloudFront serves the bucket via HTTPS at the output `cloudfront_domain_name`.
 
 ## Notes
-- The EC2 instance bootstrap script validates the kernel (`5.15.0`), architecture (`x86_64`), and Ubuntu version (`22.04`). It shuts down if they do not match.
+- The EC2 instance bootstrap script validates the kernel (`6.8.0`), architecture (`x86_64`), and Ubuntu version (`22.04`). It shuts down if they do not match.
 - The build script is installed on each EC2 instance at `/opt/qrpc-build/build_package.sh`, so GitHub Actions does not need S3 access.
 - The bootstrap reads the `Tag` instance tag via IMDS and uses fixed repo + bucket values baked into the launch template.
 - The workflow tags instances with `Project=qrpc-build-server`, `Tag`, and `ExpiresAt`; if you change `project_name` in Terraform, update the workflow tag to match.

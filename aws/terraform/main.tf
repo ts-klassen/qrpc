@@ -466,7 +466,7 @@ resource "aws_launch_template" "build" {
     log_file="/var/log/qrpc-build-bootstrap.log"
     exec > >(tee -a "$log_file") 2>&1
 
-    expected_kernel="5.15.0"
+    expected_kernel="6.8.0"
     expected_arch="x86_64"
     expected_version="22.04"
 
@@ -566,7 +566,7 @@ resource "aws_launch_template" "build" {
       fi
     }
 
-    expected_kernel="5.15.0"
+    expected_kernel="6.8.0"
     expected_arch="x86_64"
     expected_version="22.04"
 
