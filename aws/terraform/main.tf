@@ -452,6 +452,7 @@ resource "aws_launch_template" "build" {
 
     ebs {
       delete_on_termination = true
+      volume_size           = 64
     }
   }
 
