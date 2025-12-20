@@ -486,15 +486,15 @@ resource "aws_launch_template" "build" {
     fi
 
     apt-get update -y
-    apt-get install -y \\
-      awscli \\
-      bindfs \\
-      build-essential \\
-      curl \\
-      debootstrap \\
-      git \\
-      patch \\
-      rsync \\
+    apt-get install -y \
+      awscli \
+      bindfs \
+      build-essential \
+      curl \
+      debootstrap \
+      git \
+      patch \
+      rsync \
       wget
 
     cw_agent_deb="amazon-cloudwatch-agent.deb"
