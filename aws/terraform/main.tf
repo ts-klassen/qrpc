@@ -54,8 +54,7 @@ locals {
 }
 
 locals {
-  ubuntu_base_ami_id = var.ami_name != "" ? data.aws_ami.ubuntu_jammy_exact[0].id :
-  data.aws_ami_ids.ubuntu_jammy_auto.ids[0]
+  ubuntu_base_ami_id = var.ami_name != "" ? data.aws_ami.ubuntu_jammy_exact[0].id : data.aws_ami_ids.ubuntu_jammy_auto.ids[0]
 }
 
 resource "aws_s3_bucket" "releases" {
