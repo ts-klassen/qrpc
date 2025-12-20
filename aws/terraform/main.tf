@@ -547,12 +547,12 @@ resource "aws_launch_template" "build" {
     S3_PREFIX_UNUSED="$4"
 
     notify_failure() {
-      if [ -z "${QRPC_SNS_TOPIC_ARN:-}" ]; then
+      if [ -z "$${QRPC_SNS_TOPIC_ARN:-}" ]; then
         return
       fi
       local step="$1"
       local subject="qrpc build failed: $step"
-      local message="Tag $TAG failed at step '$step' on ${QRPC_INSTANCE_ID:-unknown}."
+      local message="Tag $TAG failed at step '$step' on $${QRPC_INSTANCE_ID:-unknown}."
       aws sns publish --topic-arn "$QRPC_SNS_TOPIC_ARN" --subject "$subject" --message "$message" >/dev/null 2>&1 || true
     }
 
