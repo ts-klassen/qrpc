@@ -435,6 +435,7 @@ resource "aws_launch_template" "build" {
   image_id      = local.build_ami_id
   instance_type = var.instance_type
   key_name      = var.key_name != "" ? var.key_name : null
+  update_default_version = true
 
   iam_instance_profile {
     name = aws_iam_instance_profile.build.name
