@@ -102,7 +102,7 @@ case "$1" in
   mount)
     if [ "$CHROOT_DIR" = "/" ]; then
       if ! sudo mountpoint -q _pkgsrc; then
-        MAIN_USER=$USER;
+        MAIN_USER="${USER:-$(id -un)}";
         sudo mkdir -p "$(root_path "root/pkgsrc")"
         mkdir -p _pkgsrc
         sudo bindfs --map=root/$MAIN_USER:@root/@$MAIN_USER "$(root_path "root/pkgsrc")" _pkgsrc
@@ -119,7 +119,7 @@ case "$1" in
       sudo mount --bind /opt/qrpc "$(root_path "opt/qrpc")"
     fi
     if ! sudo mountpoint -q _pkgsrc; then
-      MAIN_USER=$USER;
+      MAIN_USER="${USER:-$(id -un)}";
       sudo mkdir -p "$(root_path "root/pkgsrc")"
       mkdir -p _pkgsrc
       sudo bindfs --map=root/$MAIN_USER:@root/@$MAIN_USER "$(root_path "root/pkgsrc")" _pkgsrc
