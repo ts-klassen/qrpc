@@ -267,7 +267,7 @@ resource "aws_launch_template" "build" {
 
     if [ -r /etc/os-release ]; then
       . /etc/os-release
-      actual_version="${VERSION_ID:-}"
+      actual_version="$${VERSION_ID:-}"
     fi
 
     if [ "$actual_kernel" != "$expected_kernel" ] || [ "$actual_arch" != "$expected_arch" ] || [ "$actual_version" != "$expected_version" ]; then
@@ -321,7 +321,7 @@ resource "aws_launch_template" "build" {
 
     if [ -r /etc/os-release ]; then
       . /etc/os-release
-      actual_version="${VERSION_ID:-}"
+      actual_version="$${VERSION_ID:-}"
     fi
 
     if [ "$actual_kernel" != "$expected_kernel" ] || [ "$actual_arch" != "$expected_arch" ] || [ "$actual_version" != "$expected_version" ]; then
