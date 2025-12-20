@@ -18,14 +18,20 @@ variable "bucket_name" {
 
 variable "ami_name" {
   type        = string
-  description = "Exact Ubuntu 22.04 AMI name (oldest Jammy release) to enforce kernel 5.15.0."
-  default     = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-20220420"
+  description = "Optional exact Ubuntu 22.04 AMI name to pin. Leave empty for auto-selection."
+  default     = ""
 }
 
 variable "ami_owner" {
   type        = string
   description = "AMI owner for Canonical Ubuntu images."
   default     = "099720109477"
+}
+
+variable "ami_name_regex" {
+  type        = string
+  description = "Regex for Ubuntu 22.04 AMD64 server AMIs when ami_name is empty."
+  default     = "^ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-.*$"
 }
 
 variable "instance_type" {

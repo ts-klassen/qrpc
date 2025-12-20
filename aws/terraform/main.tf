@@ -10,7 +10,8 @@ data "aws_region" "current" {}
 
 data "aws_caller_identity" "current" {}
 
-data "aws_ami" "ubuntu_jammy" {
+data "aws_ami" "ubuntu_jammy_exact" {
+  count       = var.ami_name != "" ? 1 : 0
   owners      = [var.ami_owner]
   most_recent = false
 
@@ -18,6 +19,17 @@ data "aws_ami" "ubuntu_jammy" {
     name   = "name"
     values = [var.ami_name]
   }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
+}
+
+data "aws_ami_ids" "ubuntu_jammy_auto" {
+  owners         = [var.ami_owner]
+  sort_ascending = true
+  name_regex     = var.ami_name_regex
 
   filter {
     name   = "architecture"
@@ -39,6 +51,12 @@ data "aws_subnets" "default" {
 locals {
   vpc_id    = var.vpc_id != "" ? var.vpc_id : data.aws_vpc.default.id
   subnet_id = var.subnet_id != "" ? var.subnet_id : data.aws_subnets.default.ids[0]
+}
+
+locals {
+  ubuntu_ami_id = var.ami_name != "" ?
+    data.aws_ami.ubuntu_jammy_exact[0].id :
+    data.aws_ami_ids.ubuntu_jammy_auto.ids[0]
 }
 
 resource "aws_s3_bucket" "releases" {
@@ -228,7 +246,7 @@ resource "aws_iam_instance_profile" "build" {
 
 resource "aws_launch_template" "build" {
   name_prefix   = "${var.project_name}-build-"
-  image_id      = data.aws_ami.ubuntu_jammy.id
+  image_id      = local.ubuntu_ami_id
   instance_type = var.instance_type
   key_name      = var.key_name != "" ? var.key_name : null
 

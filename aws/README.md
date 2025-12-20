@@ -22,7 +22,8 @@ Optional variables you may want to set:
 - `bucket_name` to force a fixed S3 bucket name.
 - `subnet_id` / `vpc_id` to place the build server in a specific network.
 - `key_name` for SSH access.
-- `ami_name` if you need a different Ubuntu 22.04 AMI name.
+- `ami_name` to pin a specific Ubuntu 22.04 AMI name.
+- `ami_name_regex` to control which AMIs are considered for auto-selection.
 
 ## GitHub Actions secrets
 Add these secrets to the repository:
