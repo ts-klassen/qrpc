@@ -819,19 +819,16 @@ resource "aws_iam_role_policy" "github_actions" {
       {
         Effect = "Allow",
         Action = [
-          "ssm:SendCommand",
-          "ssm:GetCommandInvocation"
+          "ssm:SendCommand"
         ],
         Resource = [
-          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:document/AWS-RunShellScript",
           aws_ssm_document.build_run_shell.arn
         ]
       },
       {
         Effect = "Allow",
         Action = [
-          "ssm:SendCommand",
-          "ssm:GetCommandInvocation"
+          "ssm:SendCommand"
         ],
         Resource = "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
         Condition = {
@@ -877,16 +874,6 @@ resource "aws_iam_role_policy" "github_actions" {
               "Tag",
               "ExpiresAt"
             ]
-          }
-        }
-      },
-      {
-        Effect = "Allow",
-        Action = "ec2:TerminateInstances",
-        Resource = "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
-        Condition = {
-          StringEquals = {
-            "ec2:ResourceTag/Project" = var.project_name
           }
         }
       },
