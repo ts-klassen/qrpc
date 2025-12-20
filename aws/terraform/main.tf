@@ -328,7 +328,7 @@ resource "aws_imagebuilder_distribution_configuration" "build" {
   name = "${var.project_name}-distribution"
 
   distribution {
-    region = data.aws_region.current.name
+    region = var.aws_region
 
     ami_distribution_configuration {
       name = "${var.project_name}-build-{{imagebuilder:buildDate}}"
@@ -354,7 +354,7 @@ resource "aws_imagebuilder_image" "build" {
 }
 
 locals {
-  build_ami_id = aws_imagebuilder_image.build.output_resources[0].amis[0].image
+  build_ami_id = one(tolist(one(aws_imagebuilder_image.build.output_resources).amis)).image
 }
 
 resource "aws_launch_template" "build" {

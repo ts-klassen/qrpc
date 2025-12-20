@@ -14,7 +14,7 @@ output "build_launch_template_id" {
 }
 
 output "build_ami_id" {
-  value       = aws_imagebuilder_image.build.output_resources[0].amis[0].image
+  value       = one(tolist(one(aws_imagebuilder_image.build.output_resources).amis)).image
   description = "AMI ID created by Image Builder for build instances."
 }
 
