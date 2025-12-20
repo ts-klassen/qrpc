@@ -5,7 +5,7 @@ set -euo pipefail
 cd `dirname $0`
 
 CHROOT_DIR="_root"
-if [ "${IS_BUILD_SERVER:-}" = "1" ]; then
+if [ "${QRPC_BUILD_SERVER:-}" = "1" ]; then
   CHROOT_DIR="/"
 fi
 
