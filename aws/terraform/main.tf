@@ -589,7 +589,7 @@ resource "aws_launch_template" "build" {
       exit 1
     fi
 
-    workdir="/opt/qrpc-build"
+    workdir="/src"
     repo_dir="$workdir/qrpc"
 
     mkdir -p "$workdir"
