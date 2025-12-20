@@ -696,11 +696,10 @@ resource "aws_launch_template" "build" {
 
     instance_id="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \
       "http://169.254.169.254/latest/meta-data/instance-id" || true)"
-    region="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \
-      "http://169.254.169.254/latest/dynamic/instance-identity/document" \
-      | sed -n 's/.*"region"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')"
+    region="${var.aws_region}"
     if [ -n "$${region:-}" ]; then
       export AWS_REGION="$region"
+      export AWS_DEFAULT_REGION="$region"
     fi
 
     terminate_self() {
