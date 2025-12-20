@@ -38,8 +38,8 @@ Add these secrets to the repository:
 2. The workflow launches an EC2 instance from the launch template and waits for SSM.
 3. The workflow uses SSM to run the build on the EC2 instance.
 4. The instance is terminated after the build finishes (or fails), deleting its root volume.
-5. The built tarball is uploaded to `s3://<bucket>/releases/<tag>/`.
-6. The devel tarball is uploaded to `s3://<bucket>/releases/<tag>/devel/`.
+5. The built tarball is uploaded to `s3://<bucket>/` (bucket root).
+6. The devel tarball is uploaded to `s3://<bucket>/` (bucket root).
 7. CloudFront serves the bucket via HTTPS at the output `cloudfront_domain_name`.
 
 ## Notes

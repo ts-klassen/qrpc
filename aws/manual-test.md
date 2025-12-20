@@ -37,13 +37,11 @@ aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
 ```bash
 REPO_URL="https://github.com/YOUR_ORG/YOUR_REPO.git"
 TAG="vX.Y.Z"
-PREFIX="releases/$TAG"
-
 COMMAND_ID=$(aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
   --document-name "AWS-RunShellScript" \
   --comment "Manual build test for $TAG" \
-  --parameters commands="[/opt/qrpc-build/build_package.sh '$REPO_URL' '$TAG' '$BUILD_BUCKET' '$PREFIX']" \
+  --parameters commands="[/opt/qrpc-build/build_package.sh '$REPO_URL' '$TAG' '$BUILD_BUCKET' 'unused']" \
   --query "Command.CommandId" \
   --output text)
 
@@ -58,8 +56,7 @@ aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTAN
 
 ## 5) Verify S3 uploads
 ```bash
-aws s3 ls "s3://$BUILD_BUCKET/$PREFIX/"
-aws s3 ls "s3://$BUILD_BUCKET/$PREFIX/devel/"
+aws s3 ls "s3://$BUILD_BUCKET/"
 ```
 
 ## 6) Terminate instance (and delete its root volume)

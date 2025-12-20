@@ -429,7 +429,7 @@ resource "aws_launch_template" "build" {
     set -euo pipefail
 
     usage() {
-      echo "Usage: $0 <repo_url> <tag> <s3_bucket> <s3_prefix>" >&2
+      echo "Usage: $0 <repo_url> <tag> <s3_bucket> <s3_prefix_unused>" >&2
     }
 
     if [ "$#" -lt 4 ]; then
@@ -440,7 +440,7 @@ resource "aws_launch_template" "build" {
     REPO_URL="$1"
     TAG="$2"
     S3_BUCKET="$3"
-    S3_PREFIX="$4"
+    S3_PREFIX_UNUSED="$4"
 
     expected_kernel="5.15.0"
     expected_arch="x86_64"
@@ -479,8 +479,7 @@ resource "aws_launch_template" "build" {
     ./Build bootstrap
     previous_devel_key="$(aws s3api list-objects-v2 \
       --bucket "$S3_BUCKET" \
-      --prefix "releases/" \
-      --query "Contents[?contains(Key, '/devel/') && ends_with(Key, '.tar.gz')]|sort_by(@,&LastModified)[-1].Key" \
+      --query "Contents[?ends_with(Key, '-devel.tar.gz')]|sort_by(@,&LastModified)[-1].Key" \
       --output text 2>/dev/null || true)"
 
     if [ -n "$previous_devel_key" ] && [ "$previous_devel_key" != "None" ]; then
@@ -510,7 +509,8 @@ resource "aws_launch_template" "build" {
       exit 1
     fi
 
-    aws s3 cp "$package_path" "s3://$S3_BUCKET/$S3_PREFIX/"
+    package_key="$(basename "$package_path")"
+    aws s3 cp "$package_path" "s3://$S3_BUCKET/$package_key"
 
     devel_path="$(./Build package-devel | tail -n 1)"
 
@@ -519,9 +519,10 @@ resource "aws_launch_template" "build" {
       exit 1
     fi
 
-    aws s3 cp "$devel_path" "s3://$S3_BUCKET/$S3_PREFIX/devel/"
+    devel_key="$(basename "$devel_path")"
+    aws s3 cp "$devel_path" "s3://$S3_BUCKET/$devel_key"
 
-    printf "Uploaded %s to s3://%s/%s/\n" "$package_path" "$S3_BUCKET" "$S3_PREFIX"
+    printf "Uploaded %s to s3://%s/%s\n" "$package_path" "$S3_BUCKET" "$package_key"
     SCRIPT
 
     chmod +x /opt/qrpc-build/build_package.sh
