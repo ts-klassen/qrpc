@@ -1,6 +1,6 @@
 # Manual build test from AWS CloudShell (us-east-1)
 
-This runs the same flow as GitHub Actions: launch an ephemeral EC2 instance from the launch template, build via SSM, upload to S3, then terminate the instance.
+This runs the same flow as GitHub Actions: launch an ephemeral EC2 instance from the launch template, boot-time script starts the build, upload to S3, then terminate the instance.
 
 ## 1) Terraform apply and capture outputs
 ```bash
@@ -15,7 +15,7 @@ export LAUNCH_TEMPLATE_ID="$(terraform output -raw build_launch_template_id)"
 export BUILD_BUCKET="$(terraform output -raw release_bucket_name)"
 export LOG_GROUP="$(terraform output -raw build_log_group_name)"
 export PROJECT_TAG="qrpc-build-server"
-export DOCUMENT_NAME="qrpc_build_run_shell"
+export TAG="vX.Y.Z"
 ```
 
 Note: Terraform now auto-selects the oldest matching Ubuntu 22.04 AMI and
@@ -27,7 +27,7 @@ to change the selection filter.
 ```bash
 INSTANCE_ID=$(aws ec2 run-instances \
   --launch-template "LaunchTemplateId=$LAUNCH_TEMPLATE_ID" \
-  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=qrpc-build-server},{Key=Project,Value=$PROJECT_TAG},{Key=ManualTest,Value=true},{Key=ExpiresAt,Value=$(date -u -d '+24 hours' '+%Y-%m-%dT%H:%M:%SZ')}]" \
+  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=qrpc-build-server},{Key=Project,Value=$PROJECT_TAG},{Key=ManualTest,Value=true},{Key=Tag,Value=$TAG},{Key=ExpiresAt,Value=$(date -u -d '+24 hours' '+%Y-%m-%dT%H:%M:%SZ')}]" \
   --query "Instances[0].InstanceId" \
   --output text)
 
@@ -35,56 +35,15 @@ echo "Instance: $INSTANCE_ID"
 aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
 ```
 
-## 3) Run the build via SSM
+## 3) Build runs automatically on boot
 ```bash
-REPO_URL="https://github.com/YOUR_ORG/YOUR_REPO.git"
-TAG="vX.Y.Z"
-REMOTE_CMD="nohup /opt/qrpc-build/build_package.sh \"$REPO_URL\" \"$TAG\" \"$BUILD_BUCKET\" \"unused\" > /var/log/qrpc-build.log 2>&1 & pid=\$!; echo \"Started build PID \$pid\"; tail -n +1 -F --pid=\$pid /var/log/qrpc-build.log"
-COMMAND_ID=$(aws ssm send-command \
-  --instance-ids "$INSTANCE_ID" \
-  --document-name "$DOCUMENT_NAME" \
-  --comment "Manual build test for $TAG" \
-  --cloud-watch-output-config "CloudWatchOutputEnabled=true,CloudWatchLogGroupName=$LOG_GROUP" \
-  --parameters commands="$REMOTE_CMD" \
-  --query "Command.CommandId" \
-  --output text)
-
-echo "SSM command: $COMMAND_ID"
-aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
+echo "Build starts automatically; logs are written to /var/log/qrpc-build.log on the instance."
+echo "CloudWatch Logs also streams /var/log/qrpc-build.log (log group: $LOG_GROUP)."
 ```
 
-## 4) Inspect command output
+## 4) Tail CloudWatch Logs (optional)
 ```bash
-aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
-```
-CloudWatch Logs are streamed to the log group (default `/qrpc/build`).
-
-## 4.5) Poll stdout/stderr while running (optional)
-This is useful to confirm progress during a manual test. We re-fetch it every few
-seconds and tail the last lines.
-
-stdout:
-```bash
-while true; do
-  aws ssm get-command-invocation \
-    --command-id "$COMMAND_ID" \
-    --instance-id "$INSTANCE_ID" \
-    --query 'StandardOutputContent' \
-    --output text | tail -n 50
-  sleep 5
-done
-```
-
-stderr:
-```bash
-while true; do
-  aws ssm get-command-invocation \
-    --command-id "$COMMAND_ID" \
-    --instance-id "$INSTANCE_ID" \
-    --query 'StandardErrorContent' \
-    --output text | tail -n 50
-  sleep 5
-done
+aws logs tail "$LOG_GROUP" --since 10m --follow
 ```
 
 ## 5) Verify S3 uploads

@@ -214,11 +214,6 @@ resource "aws_iam_role" "build_instance" {
   tags = var.tags
 }
 
-resource "aws_iam_role_policy_attachment" "build_ssm" {
-  role       = aws_iam_role.build_instance.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
 resource "aws_iam_role_policy" "build_s3" {
   name = "${var.project_name}-build-s3"
   role = aws_iam_role.build_instance.id
@@ -248,6 +243,44 @@ resource "aws_iam_role_policy" "build_s3" {
           "s3:GetObject"
         ],
         Resource = "${aws_s3_bucket.releases.arn}/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "build_logs" {
+  name = "${var.project_name}-build-logs"
+  role = aws_iam_role.build_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "logs:DescribeLogStreams",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
+        Resource = "${aws_cloudwatch_log_group.build.arn}:*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "build_notify_sns" {
+  name = "${var.project_name}-build-notify-sns"
+  role = aws_iam_role.build_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "sns:Publish"
+        ],
+        Resource = aws_sns_topic.build_notify.arn
       }
     ]
   })
@@ -421,6 +454,10 @@ resource "aws_launch_template" "build" {
     }
   }
 
+  metadata_options {
+    instance_metadata_tags = "enabled"
+  }
+
   user_data = base64encode(<<-USER_DATA
     #!/usr/bin/env bash
     set -euo pipefail
@@ -459,8 +496,9 @@ resource "aws_launch_template" "build" {
       rsync \\
       wget
 
-    systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent || true
-    systemctl enable --now amazon-ssm-agent || true
+    cw_agent_deb="amazon-cloudwatch-agent.deb"
+    curl -fSL "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/$cw_agent_deb" -o "/tmp/$cw_agent_deb"
+    dpkg -i "/tmp/$cw_agent_deb"
 
     mkdir -p /opt/qrpc-build
 
@@ -473,24 +511,26 @@ resource "aws_launch_template" "build" {
         return
       fi
 
-      token="$$(curl -sS -m 3 -X PUT "http://169.254.169.254/latest/api/token" \\
+      token="$(curl -sS -m 3 -X PUT "http://169.254.169.254/latest/api/token" \\
         -H "X-aws-ec2-metadata-token-ttl-seconds: 300" || true)"
       if [ -z "$${token:-}" ]; then
         return
       fi
 
-      instance_id="$$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $$token" \\
+      instance_id="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \\
         "http://169.254.169.254/latest/meta-data/instance-id" || true)"
-      region="$$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $$token" \\
+      region="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \\
         "http://169.254.169.254/latest/dynamic/instance-identity/document" \\
         | sed -n 's/.*"region"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')"
 
-      if [ -n "$$instance_id" ] && [ -n "$$region" ]; then
-        aws ec2 terminate-instances --region "$$region" --instance-ids "$$instance_id" >/dev/null 2>&1 || true
+      if [ -n "$instance_id" ] && [ -n "$region" ]; then
+        aws ec2 terminate-instances --region "$region" --instance-ids "$instance_id" >/dev/null 2>&1 || true
       fi
     }
 
-    trap self_terminate EXIT
+    if [ "$${QRPC_SELF_TERMINATE:-1}" = "1" ]; then
+      trap self_terminate EXIT
+    fi
 
     usage() {
       echo "Usage: $0 <repo_url> <tag> <s3_bucket> <s3_prefix_unused>" >&2
@@ -505,6 +545,25 @@ resource "aws_launch_template" "build" {
     TAG="$2"
     S3_BUCKET="$3"
     S3_PREFIX_UNUSED="$4"
+
+    notify_failure() {
+      if [ -z "${QRPC_SNS_TOPIC_ARN:-}" ]; then
+        return
+      fi
+      local step="$1"
+      local subject="qrpc build failed: $step"
+      local message="Tag $TAG failed at step '$step' on ${QRPC_INSTANCE_ID:-unknown}."
+      aws sns publish --topic-arn "$QRPC_SNS_TOPIC_ARN" --subject "$subject" --message "$message" >/dev/null 2>&1 || true
+    }
+
+    run_step() {
+      local step="$1"
+      shift
+      if ! "$@"; then
+        notify_failure "$step"
+        exit 1
+      fi
+    }
 
     expected_kernel="5.15.0"
     expected_arch="x86_64"
@@ -535,12 +594,12 @@ resource "aws_launch_template" "build" {
     mkdir -p "$workdir"
     rm -rf "$repo_dir"
 
-    git clone --depth 1 --branch "$TAG" "$REPO_URL" "$repo_dir"
+    run_step "git clone" git clone --depth 1 --branch "$TAG" "$REPO_URL" "$repo_dir"
 
     cd "$repo_dir"
 
     export QRPC_BUILD_SERVER=1
-    ./Build bootstrap
+    run_step "bootstrap" ./Build bootstrap
     previous_devel_key="$(aws s3api list-objects-v2 \
       --bucket "$S3_BUCKET" \
       --query "Contents[?contains(Key, '$${expected_arch}') && contains(Key, 'ubuntu$${expected_version}') && ends_with(Key, '-devel.tar.gz')]|sort_by(@,&LastModified)[-1].Key" \
@@ -549,14 +608,15 @@ resource "aws_launch_template" "build" {
     if [ -n "$previous_devel_key" ] && [ "$previous_devel_key" != "None" ]; then
       tmp_dir="$(mktemp -d)"
       tmp_tar="$tmp_dir/qrpc-devel.tar.gz"
-      aws s3 cp "s3://$S3_BUCKET/$previous_devel_key" "$tmp_tar"
+      run_step "download previous devel" aws s3 cp "s3://$S3_BUCKET/$previous_devel_key" "$tmp_tar"
       tar -zxf "$tmp_tar" -C "$tmp_dir"
       install_script="$(find "$tmp_dir" -maxdepth 2 -name install.sh -print -quit)"
       if [ -n "$install_script" ]; then
         chmod +x "$install_script"
-        "$install_script"
+        run_step "install previous devel" "$install_script"
       else
         echo "No install.sh found in previous devel package $previous_devel_key" >&2
+        notify_failure "install previous devel"
         exit 1
       fi
       rm -rf "$tmp_dir"
@@ -564,95 +624,193 @@ resource "aws_launch_template" "build" {
       echo "No previous devel package found; continuing without cache."
     fi
 
-    ./Build devel
+    run_step "devel" ./Build devel
 
-    package_path="$(./Build package | tail -n 1)"
+    package_path="$(run_step "package" bash -o pipefail -c './Build package | tail -n 1')"
 
     if [ ! -f "$package_path" ]; then
       echo "Package not found at $package_path" >&2
+      notify_failure "package"
       exit 1
     fi
 
     package_key="$(basename "$package_path")"
-    aws s3 cp "$package_path" "s3://$S3_BUCKET/$package_key"
+    run_step "upload package" aws s3 cp "$package_path" "s3://$S3_BUCKET/$package_key"
 
-    devel_path="$(./Build package-devel | tail -n 1)"
+    devel_path="$(run_step "package-devel" bash -o pipefail -c './Build package-devel | tail -n 1')"
 
     if [ ! -f "$devel_path" ]; then
       echo "Devel package not found at $devel_path" >&2
+      notify_failure "package-devel"
       exit 1
     fi
 
     devel_key="$(basename "$devel_path")"
-    aws s3 cp "$devel_path" "s3://$S3_BUCKET/$devel_key"
+    run_step "upload devel" aws s3 cp "$devel_path" "s3://$S3_BUCKET/$devel_key"
 
     printf "Uploaded %s to s3://%s/%s\n" "$package_path" "$S3_BUCKET" "$package_key"
     SCRIPT
 
     chmod +x /opt/qrpc-build/build_package.sh
-  USER_DATA
-  )
 
-  tags = var.tags
-}
-
-resource "aws_cloudwatch_event_rule" "ssm_command_start" {
-  name = "${var.project_name}-ssm-command-start"
-  event_pattern = jsonencode({
-    source      = ["aws.ssm"],
-    "detail-type" = ["EC2 Command Status-change Notification"],
-    detail = {
-      "document-name" = [aws_ssm_document.build_run_shell.name],
-      status = ["InProgress"]
-    }
-  })
-}
-
-resource "aws_cloudwatch_event_rule" "ssm_command_finish" {
-  name = "${var.project_name}-ssm-command-finish"
-  event_pattern = jsonencode({
-    source      = ["aws.ssm"],
-    "detail-type" = ["EC2 Command Status-change Notification"],
-    detail = {
-      "document-name" = [aws_ssm_document.build_run_shell.name],
-      status = ["Success", "Failed", "TimedOut", "Cancelled"]
-    }
-  })
-}
-
-resource "aws_cloudwatch_event_target" "ssm_command_start_sns" {
-  rule = aws_cloudwatch_event_rule.ssm_command_start.name
-  arn  = aws_sns_topic.build_notify.arn
-}
-
-resource "aws_cloudwatch_event_target" "ssm_command_finish_sns" {
-  rule = aws_cloudwatch_event_rule.ssm_command_finish.name
-  arn  = aws_sns_topic.build_notify.arn
-}
-
-resource "aws_sns_topic_policy" "build_notify" {
-  arn = aws_sns_topic.build_notify.arn
-
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [
-      {
-        Sid       = "AllowEventBridgePublish",
-        Effect    = "Allow",
-        Principal = { Service = "events.amazonaws.com" },
-        Action    = "sns:Publish",
-        Resource  = aws_sns_topic.build_notify.arn,
-        Condition = {
-          ArnEquals = {
-            "aws:SourceArn" = [
-              aws_cloudwatch_event_rule.ssm_command_start.arn,
-              aws_cloudwatch_event_rule.ssm_command_finish.arn
+    cat > /opt/qrpc-build/cloudwatch-agent.json <<'SCRIPT'
+    {
+      "logs": {
+        "logs_collected": {
+          "files": {
+            "collect_list": [
+              {
+                "file_path": "/var/log/qrpc-build.log",
+                "log_group_name": "${var.log_group_name}",
+                "log_stream_name": "{instance_id}/qrpc-build"
+              }
             ]
           }
         }
       }
-    ]
-  })
+    }
+    SCRIPT
+
+    cat > /opt/qrpc-build/start_build.sh <<'SCRIPT'
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    log_file="/var/log/qrpc-build.log"
+    skip_terminate_self=0
+
+    token=""
+    for _ in $(seq 1 5); do
+      token="$(curl -sS -m 3 -X PUT "http://169.254.169.254/latest/api/token" \
+        -H "X-aws-ec2-metadata-token-ttl-seconds: 300" || true)"
+      if [ -n "$${token:-}" ]; then
+        break
+      fi
+      sleep 1
+    done
+    if [ -z "$${token:-}" ]; then
+      echo "Failed to acquire IMDSv2 token." >&2
+      shutdown -h now || true
+      exit 1
+    fi
+
+    instance_id="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \
+      "http://169.254.169.254/latest/meta-data/instance-id" || true)"
+    region="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \
+      "http://169.254.169.254/latest/dynamic/instance-identity/document" \
+      | sed -n 's/.*"region"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')"
+    if [ -n "$${region:-}" ]; then
+      export AWS_REGION="$region"
+    fi
+
+    terminate_self() {
+      if [ "$skip_terminate_self" = "1" ]; then
+        return
+      fi
+      if ! command -v aws >/dev/null 2>&1; then
+        shutdown -h now || true
+        return
+      fi
+
+      if [ -z "$${instance_id:-}" ]; then
+        instance_id="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \
+          "http://169.254.169.254/latest/meta-data/instance-id" || true)"
+      fi
+      if [ -z "$${region:-}" ]; then
+        region="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \
+          "http://169.254.169.254/latest/dynamic/instance-identity/document" \
+          | sed -n 's/.*"region"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')"
+      fi
+      if [ -n "$${instance_id:-}" ] && [ -n "$${region:-}" ]; then
+        aws ec2 terminate-instances --region "$region" --instance-ids "$instance_id" >/dev/null 2>&1 || true
+        return
+      fi
+
+      shutdown -h now || true
+    }
+
+    trap terminate_self EXIT
+
+    topic_arn="${aws_sns_topic.build_notify.arn}"
+
+    publish_status() {
+      if ! command -v aws >/dev/null 2>&1; then
+        return
+      fi
+      if [ -z "$${topic_arn:-}" ]; then
+        return
+      fi
+      local subject="qrpc build $1"
+      local message="$2"
+      aws sns publish --topic-arn "$topic_arn" --subject "$subject" --message "$message" >/dev/null 2>&1 || true
+    }
+
+    tag=""
+    for _ in $(seq 1 30); do
+      tag="$(curl -sS -m 3 -H "X-aws-ec2-metadata-token: $token" \
+        "http://169.254.169.254/latest/meta-data/tags/instance/Tag" || true)"
+      if [ -n "$${tag:-}" ]; then
+        break
+      fi
+      sleep 2
+    done
+    if [ -z "$${tag:-}" ]; then
+      echo "Missing instance Tag value; refusing to run build." >&2
+      terminate_self
+      exit 1
+    fi
+
+    repo_url="https://github.com/${var.github_repository}.git"
+    s3_bucket="${aws_s3_bucket.releases.bucket}"
+
+    export QRPC_SNS_TOPIC_ARN="$topic_arn"
+    export QRPC_INSTANCE_ID="$instance_id"
+
+    {
+      echo "==== start_build.sh (embedded) ===="
+      cat /opt/qrpc-build/start_build.sh
+      echo "==== build_package.sh (embedded) ===="
+      cat /opt/qrpc-build/build_package.sh
+    } >> "$log_file"
+
+    set +e
+    /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+      -a fetch-config \
+      -m ec2 \
+      -c file:/opt/qrpc-build/cloudwatch-agent.json \
+      -s
+    cw_status="$?"
+    set -e
+    # If log shipping is broken, shut down without attempting API termination to avoid
+    # losing the local logs needed for debugging.
+    if [ "$cw_status" -ne 0 ]; then
+      skip_terminate_self=1
+      echo "CloudWatch Agent failed to start; shutting down for manual log recovery." >> "$log_file"
+      shutdown -h now || true
+      exit 1
+    fi
+
+    publish_status "started" "Tag $tag started on $${instance_id:-unknown}."
+
+    set +e
+    QRPC_SELF_TERMINATE=0 /opt/qrpc-build/build_package.sh "$repo_url" "$tag" "$s3_bucket" "unused" \
+      > "$log_file" 2>&1
+    status="$?"
+    set -e
+
+    if [ "$status" -eq 0 ]; then
+      publish_status "succeeded" "Tag $tag finished on $${instance_id:-unknown}."
+    fi
+
+    terminate_self
+    exit "$status"
+    SCRIPT
+
+    chmod +x /opt/qrpc-build/start_build.sh
+    /opt/qrpc-build/start_build.sh
+  USER_DATA
+  )
+
+  tags = var.tags
 }
 
 data "archive_file" "ttl_cleanup" {
@@ -759,29 +917,6 @@ resource "aws_iam_openid_connect_provider" "github" {
   thumbprint_list = [var.github_oidc_thumbprint]
 }
 
-resource "aws_ssm_document" "build_run_shell" {
-  name            = var.ssm_document_name
-  document_type   = "Command"
-  document_format = "YAML"
-
-  content = <<-DOC
-    schemaVersion: "2.2"
-    description: Run qrpc build command
-    parameters:
-      commands:
-        type: StringList
-        description: Commands to run
-        default: []
-    mainSteps:
-      - action: aws:runShellScript
-        name: runShellScript
-        inputs:
-          runCommand: "{{ commands }}"
-  DOC
-
-  tags = var.tags
-}
-
 resource "aws_iam_role" "github_actions" {
   name = "${var.project_name}-github-actions"
 
@@ -819,27 +954,6 @@ resource "aws_iam_role_policy" "github_actions" {
       {
         Effect = "Allow",
         Action = [
-          "ssm:SendCommand"
-        ],
-        Resource = [
-          aws_ssm_document.build_run_shell.arn
-        ]
-      },
-      {
-        Effect = "Allow",
-        Action = [
-          "ssm:SendCommand"
-        ],
-        Resource = "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
-        Condition = {
-          StringEquals = {
-            "ssm:resourceTag/Project" = var.project_name
-          }
-        }
-      },
-      {
-        Effect = "Allow",
-        Action = [
           "ec2:DescribeInstances"
         ],
         Resource = "*"
@@ -870,7 +984,6 @@ resource "aws_iam_role_policy" "github_actions" {
               "Project",
               "Name",
               "GitHubRun",
-              "Repo",
               "Tag",
               "ExpiresAt"
             ]

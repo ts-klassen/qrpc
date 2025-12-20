@@ -28,11 +28,6 @@ output "build_notify_topic_arn" {
   description = "SNS topic ARN for build start/finish notifications."
 }
 
-output "build_ssm_document_name" {
-  value       = aws_ssm_document.build_run_shell.name
-  description = "SSM document name for running build commands."
-}
-
 output "github_actions_role_arn" {
   value       = aws_iam_role.github_actions.arn
   description = "IAM role to assume from GitHub Actions via OIDC."

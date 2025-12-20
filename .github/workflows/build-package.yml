@@ -12,6 +12,8 @@ permissions:
 jobs:
   build-on-ec2:
     runs-on: ubuntu-latest
+    # NOTE: This workflow only starts the EC2 build. It does not wait for or verify
+    # completion, because the build can take hours and runs asynchronously on the instance.
 
     steps:
       - name: Checkout
@@ -46,17 +48,12 @@ jobs:
           role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Trigger EC2 build via SSM
+      - name: Trigger EC2 build
         if: steps.verify.outputs.on_main == 'true'
         env:
           LAUNCH_TEMPLATE_ID: ${{ secrets.AWS_BUILD_LAUNCH_TEMPLATE_ID }}
-          BUCKET: ${{ secrets.AWS_BUILD_BUCKET }}
           TAG: ${{ steps.tag.outputs.tag }}
-          REPO_URL: https://github.com/${{ github.repository }}.git
-          PREFIX: releases/${{ steps.tag.outputs.tag }}
-          LOG_GROUP: /qrpc/build
           PROJECT_TAG: qrpc-build-server
-          DOCUMENT_NAME: qrpc_build_run_shell
         run: |
           set -euo pipefail
 
@@ -64,40 +61,10 @@ jobs:
 
           INSTANCE_ID=$(aws ec2 run-instances \
             --launch-template "LaunchTemplateId=$LAUNCH_TEMPLATE_ID" \
-            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$PROJECT_TAG},{Key=Project,Value=$PROJECT_TAG},{Key=GitHubRun,Value=$GITHUB_RUN_ID},{Key=Repo,Value=$GITHUB_REPOSITORY},{Key=Tag,Value=$TAG},{Key=ExpiresAt,Value=$expires_at}]" \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$PROJECT_TAG},{Key=Project,Value=$PROJECT_TAG},{Key=GitHubRun,Value=$GITHUB_RUN_ID},{Key=Tag,Value=$TAG},{Key=ExpiresAt,Value=$expires_at}]" \
             --query "Instances[0].InstanceId" \
             --output text)
 
           echo "EC2 instance: $INSTANCE_ID"
           aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
-
-          remote_cmd="nohup /opt/qrpc-build/build_package.sh '$REPO_URL' '$TAG' '$BUCKET' '$PREFIX' > /var/log/qrpc-build.log 2>&1 & pid=\$!; echo \"Started build PID \$pid\"; tail -n +1 -F --pid=\$pid /var/log/qrpc-build.log"
-
-          command_id=""
-          for _ in $(seq 1 60); do
-            set +e
-            command_id=$(aws ssm send-command \
-              --instance-ids "$INSTANCE_ID" \
-              --document-name "$DOCUMENT_NAME" \
-              --comment "Build qrpc package for $TAG" \
-              --cloud-watch-output-config "CloudWatchOutputEnabled=true,CloudWatchLogGroupName=$LOG_GROUP" \
-              --parameters commands="$remote_cmd" \
-              --query "Command.CommandId" \
-              --output text 2>/dev/null)
-            status=$?
-            set -e
-
-            if [ "$status" -eq 0 ] && [ -n "$command_id" ] && [ "$command_id" != "None" ]; then
-              break
-            fi
-
-            sleep 10
-          done
-
-          if [ -z "$command_id" ] || [ "$command_id" = "None" ]; then
-            echo "Unable to start SSM command; SSM agent did not come online in time."
-            exit 1
-          fi
-
-          echo "SSM command: $command_id"
-          echo "Build running in background; logs are streamed to CloudWatch Logs ($LOG_GROUP)."
+          echo "Build starts automatically on the instance using its Tag/ExpiresAt tags."

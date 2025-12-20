@@ -80,12 +80,6 @@ variable "log_group_name" {
   default     = "/qrpc/build"
 }
 
-variable "ssm_document_name" {
-  type        = string
-  description = "SSM document name for build commands."
-  default     = "qrpc_build_run_shell"
-}
-
 variable "tags" {
   type        = map(string)
   description = "Common tags applied to resources."
