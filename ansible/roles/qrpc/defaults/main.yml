@@ -2,7 +2,7 @@
 # Default variables for qrpc deployment
 
 qrpc_version: "0.1.0"
-qrpc_arch: "x86_64-unknown-linux-gnu"
+qrpc_arch: "linux-x86_64-5.15.0-ubuntu22.04"
 
 # Absolute path to the project root derived from playbook_dir.
 # This lets real playbooks live anywhere under ansible/ without

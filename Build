@@ -26,6 +26,35 @@ chroot_cmd() {
   fi
 }
 
+platform_tag() {
+  local os_name arch kernel os_id os_version distro_tag
+  os_name="$(uname -s)"
+  arch="$(uname -m)"
+  kernel="$(uname -r)"
+  kernel="${kernel%%-*}"
+  os_id=""
+  os_version=""
+  if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    os_id="${ID:-${NAME:-}}"
+    os_version="${VERSION_ID:-}"
+    if [ -z "$os_version" ]; then
+      os_version="$(printf '%s' "${VERSION:-}" | sed -n 's/^[^0-9]*\([0-9][0-9.]*\).*/\1/p')"
+    fi
+  fi
+  if [ -z "$os_id" ]; then
+    os_id="$os_name"
+  fi
+  if [ -z "$os_version" ]; then
+    os_version="$(uname -r)"
+  fi
+  os_name="$(printf '%s' "$os_name" | tr '[:upper:]' '[:lower:]')"
+  os_id="$(printf '%s' "$os_id" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]._-')"
+  os_version="$(printf '%s' "$os_version" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]._-')"
+  distro_tag="${os_id}${os_version}"
+  printf "%s-%s-%s-%s" "$os_name" "$arch" "$kernel" "$distro_tag"
+}
+
 case "$1" in
   bootstrap)
     ./Build unmount
@@ -151,7 +180,7 @@ case "$1" in
         . .pkgrc
     ' > _pkgsrc/packages/qrpc-prod/install.sh
     chmod +x _pkgsrc/packages/qrpc-prod/install.sh
-    name="$(basename "${prod%.tar.gz}")-$(rustc -Vv | sed -n 's/^host: //p')"
+    name="$(basename "${prod%.tar.gz}")-$(platform_tag)"
     mkdir -p _release_packages
     mv _pkgsrc/packages/qrpc-prod "_release_packages/${name}"
     cd _release_packages
@@ -188,7 +217,7 @@ mkdir -p /opt/qrpc/pkg/etc/openssl/certs
 echo INSTALL COMPLETE
 ' > _pkgsrc/packages/qrpc-devel/install.sh
     chmod +x _pkgsrc/packages/qrpc-devel/install.sh
-    name="$(basename "${prod%.tar.gz}")-$(rustc -Vv | sed -n 's/^host: //p')-devel"
+    name="$(basename "${prod%.tar.gz}")-$(platform_tag)-devel"
     mkdir -p _release_packages
     mv _pkgsrc/packages/qrpc-devel "_release_packages/${name}"
     cd _release_packages

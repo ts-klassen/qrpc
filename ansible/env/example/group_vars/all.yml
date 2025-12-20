@@ -5,7 +5,7 @@
 
 # Version and source of the qrpc release.
 qrpc_version: "0.1.0"
-qrpc_arch: "x86_64-unknown-linux-gnu"
+qrpc_arch: "linux-x86_64-5.15.0-ubuntu22.04"
 
 # Use the locally built tarball on the control node by default.
 # The qrpc_repo_root variable (defined in the role defaults) points
