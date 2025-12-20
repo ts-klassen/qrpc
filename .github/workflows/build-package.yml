@@ -1,0 +1,107 @@
+name: Build package on EC2
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-on-ec2:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Capture tag
+        id: tag
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag is on main
+        id: verify
+        run: |
+          git fetch origin main
+          if git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"; then
+            echo "on_main=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "on_main=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip when tag is not on main
+        if: steps.verify.outputs.on_main != 'true'
+        run: echo "Tag is not reachable from main; skipping build."
+
+      - name: Configure AWS credentials
+        if: steps.verify.outputs.on_main == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Trigger EC2 build via SSM
+        if: steps.verify.outputs.on_main == 'true'
+        env:
+          LAUNCH_TEMPLATE_ID: ${{ secrets.AWS_BUILD_LAUNCH_TEMPLATE_ID }}
+          BUCKET: ${{ secrets.AWS_BUILD_BUCKET }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          REPO_URL: https://github.com/${{ github.repository }}.git
+          PREFIX: releases/${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          cleanup() {
+            if [ -n "${INSTANCE_ID:-}" ]; then
+              aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" >/dev/null
+              aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID"
+            fi
+          }
+
+          trap cleanup EXIT
+
+          INSTANCE_ID=$(aws ec2 run-instances \
+            --launch-template "LaunchTemplateId=$LAUNCH_TEMPLATE_ID" \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=qrpc-build-server},{Key=Project,Value=qrpc-build-server},{Key=GitHubRun,Value=$GITHUB_RUN_ID},{Key=Repo,Value=$GITHUB_REPOSITORY},{Key=Tag,Value=$TAG}]" \
+            --query "Instances[0].InstanceId" \
+            --output text)
+
+          echo "EC2 instance: $INSTANCE_ID"
+          aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+
+          commands_json=$(printf '[\"%s\"]' \
+            "/opt/qrpc-build/build_package.sh '$REPO_URL' '$TAG' '$BUCKET' '$PREFIX'")
+
+          command_id=""
+          for _ in $(seq 1 60); do
+            set +e
+            command_id=$(aws ssm send-command \
+              --instance-ids "$INSTANCE_ID" \
+              --document-name "AWS-RunShellScript" \
+              --comment "Build qrpc package for $TAG" \
+              --parameters commands="$commands_json" \
+              --query "Command.CommandId" \
+              --output text 2>/dev/null)
+            status=$?
+            set -e
+
+            if [ "$status" -eq 0 ] && [ -n "$command_id" ] && [ "$command_id" != "None" ]; then
+              break
+            fi
+
+            sleep 10
+          done
+
+          if [ -z "$command_id" ] || [ "$command_id" = "None" ]; then
+            echo "Unable to start SSM command; SSM agent did not come online in time."
+            exit 1
+          fi
+
+          echo "SSM command: $command_id"
+          aws ssm wait command-executed --command-id "$command_id" --instance-id "$INSTANCE_ID"
