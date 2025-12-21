@@ -37,7 +37,7 @@ variable "ami_name_regex" {
 variable "instance_type" {
   type        = string
   description = "EC2 instance type for the build server."
-  default     = "t3.xlarge"
+  default     = "t3.small"
 }
 
 variable "subnet_id" {

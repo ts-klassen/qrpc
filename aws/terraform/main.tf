@@ -500,7 +500,7 @@ resource "aws_launch_template" "build" {
 
     swap_file="/swapfile"
     if ! swapon --show | grep -q "$swap_file"; then
-      fallocate -l 4G "$swap_file" || dd if=/dev/zero of="$swap_file" bs=1M count=4096
+      fallocate -l 8G "$swap_file" || dd if=/dev/zero of="$swap_file" bs=1M count=8192
       chmod 600 "$swap_file"
       mkswap "$swap_file"
       swapon "$swap_file"
