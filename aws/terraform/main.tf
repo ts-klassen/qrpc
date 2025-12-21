@@ -498,6 +498,15 @@ resource "aws_launch_template" "build" {
       rsync \
       wget
 
+    swap_file="/swapfile"
+    if ! swapon --show | grep -q "$swap_file"; then
+      fallocate -l 4G "$swap_file" || dd if=/dev/zero of="$swap_file" bs=1M count=4096
+      chmod 600 "$swap_file"
+      mkswap "$swap_file"
+      swapon "$swap_file"
+      echo "$swap_file none swap sw 0 0" >> /etc/fstab
+    fi
+
     cw_agent_deb="amazon-cloudwatch-agent.deb"
     curl -fSL "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/$cw_agent_deb" -o "/tmp/$cw_agent_deb"
     dpkg -i "/tmp/$cw_agent_deb"
@@ -673,6 +682,9 @@ resource "aws_launch_template" "build" {
 
     log_file="/var/log/qrpc-build.log"
     skip_terminate_self=0
+    if [ "$${QRPC_NO_SELF_TERMINATE:-0}" = "1" ]; then
+      skip_terminate_self=1
+    fi
 
     token=""
     for _ in $(seq 1 5); do
@@ -787,7 +799,7 @@ resource "aws_launch_template" "build" {
     publish_status "started" "Tag $tag started on $${instance_id:-unknown}."
 
     set +e
-    QRPC_SELF_TERMINATE=0 /opt/qrpc-build/build_package.sh "$repo_url" "$tag" "$s3_bucket" "unused" \
+    QRPC_SELF_TERMINATE=0 stdbuf -oL -eL /opt/qrpc-build/build_package.sh "$repo_url" "$tag" "$s3_bucket" "unused" \
       > "$log_file" 2>&1
     status="$?"
     set -e
@@ -801,7 +813,28 @@ resource "aws_launch_template" "build" {
     SCRIPT
 
     chmod +x /opt/qrpc-build/start_build.sh
-    /opt/qrpc-build/start_build.sh
+
+    cat > /etc/systemd/system/qrpc-build.service <<'SERVICE'
+    [Unit]
+    Description=QRPC build runner
+    After=network-online.target
+    Wants=network-online.target
+
+    [Service]
+    Type=oneshot
+    ExecStart=/opt/qrpc-build/start_build.sh
+    StandardOutput=append:/var/log/qrpc-build.log
+    StandardError=append:/var/log/qrpc-build.log
+    TimeoutStartSec=0
+    RuntimeMaxSec=0
+
+    [Install]
+    WantedBy=multi-user.target
+    SERVICE
+
+    systemctl daemon-reload
+    systemctl enable qrpc-build.service
+    systemctl start qrpc-build.service
   USER_DATA
   )
 
