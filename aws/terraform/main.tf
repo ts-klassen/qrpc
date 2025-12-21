@@ -628,29 +628,23 @@ resource "aws_launch_template" "build" {
 
     run_step "devel" ./Build devel
 
-    package_path="$(run_step "package" bash -o pipefail -c './Build package | tail -n 1')"
+    run_step "package" ./Build package
+    run_step "package-devel" ./Build package-devel
 
-    if [ ! -f "$package_path" ]; then
-      echo "Package not found at $package_path" >&2
-      notify_failure "package"
+    shopt -s nullglob
+    packages=( _release_packages/*.tar.gz )
+    if [ "$${#packages[@]}" -eq 0 ]; then
+      echo "No packages found in _release_packages" >&2
+      notify_failure "upload packages"
       exit 1
     fi
 
-    package_key="$(basename "$package_path")"
-    run_step "upload package" aws s3 cp "$package_path" "s3://$S3_BUCKET/$package_key"
+    for package_path in "$${packages[@]}"; do
+      package_key="$(basename "$package_path")"
+      run_step "upload $package_key" aws s3 cp "$package_path" "s3://$S3_BUCKET/$package_key"
+    done
 
-    devel_path="$(run_step "package-devel" bash -o pipefail -c './Build package-devel | tail -n 1')"
-
-    if [ ! -f "$devel_path" ]; then
-      echo "Devel package not found at $devel_path" >&2
-      notify_failure "package-devel"
-      exit 1
-    fi
-
-    devel_key="$(basename "$devel_path")"
-    run_step "upload devel" aws s3 cp "$devel_path" "s3://$S3_BUCKET/$devel_key"
-
-    printf "Uploaded %s to s3://%s/%s\n" "$package_path" "$S3_BUCKET" "$package_key"
+    printf "Uploaded %s package(s) to s3://%s\n" "$${#packages[@]}" "$S3_BUCKET"
     SCRIPT
 
     chmod +x /opt/qrpc-build/build_package.sh
