@@ -824,6 +824,7 @@ resource "aws_launch_template" "build" {
 
     [Service]
     Type=oneshot
+    Environment=HOME=/root
     ExecStart=/opt/qrpc-build/start_build.sh
     StandardOutput=append:/var/log/qrpc-build.log
     StandardError=append:/var/log/qrpc-build.log
