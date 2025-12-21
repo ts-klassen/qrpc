@@ -713,6 +713,8 @@ resource "aws_launch_template" "build" {
       if [ "$skip_terminate_self" = "1" ]; then
         return
       fi
+      # Give log shipping time to flush before terminating.
+      sleep 60
       if ! command -v aws >/dev/null 2>&1; then
         shutdown -h now || true
         return
