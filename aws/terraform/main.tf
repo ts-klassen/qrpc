@@ -834,7 +834,7 @@ resource "aws_launch_template" "build" {
 
     systemctl daemon-reload
     systemctl enable qrpc-build.service
-    systemctl start qrpc-build.service
+    reboot
   USER_DATA
   )
 
