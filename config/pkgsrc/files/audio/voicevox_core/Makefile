@@ -39,7 +39,7 @@ VV_DICT_SRC=            ${WRKSRC}/${VV_DICT_DIR}
 
 DISTFILES=              download-linux-x64 ${VV_DICT_DISTFILE}
 SITES.${VV_DICT_DISTFILE}= \
-	https://jaist.dl.sourceforge.net/project/open-jtalk/Dictionary/open_jtalk_dic-1.11/
+	https://packages.qrpc.jp/
 EXTRACT_ONLY=           ${VV_DICT_DISTFILE}
 DOWNLOAD_BIN=   ${DISTDIR}/${DIST_SUBDIR}/download-linux-x64
 
