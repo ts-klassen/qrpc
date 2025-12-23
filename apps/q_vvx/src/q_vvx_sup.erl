@@ -26,12 +26,19 @@ start_link() ->
 %%                  type => worker(),       % optional
 %%                  modules => modules()}   % optional
 init([]) ->
+    ChildSpecs = [
+        #{
+            id => q_vvx_worker_sup
+          , start => {q_vvx_worker_sup, start_link, []}
+          , restart => permanent
+          , type => supervisor
+        }
+    ],
     SupFlags = #{
-        strategy => one_for_all,
-        intensity => 0,
+        strategy => one_for_one,
+        intensity => length(ChildSpecs) + 1,
         period => 1
     },
-    ChildSpecs = [],
     {ok, {SupFlags, ChildSpecs}}.
 
 %% internal functions
