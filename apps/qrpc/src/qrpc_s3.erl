@@ -44,12 +44,15 @@
       , delete_bucket_lifecycle/3
       , get_bucket_attribute/4
       , set_bucket_attribute/5
+      , share_urls/1
     ]).
 
 -export_type([
         access_key/0
       , config/0
       , bucket/0
+      , profile_id/0
+      , profile/0
       , key/0
       , ttl/0
       , http_method/0
@@ -98,6 +101,19 @@
     }.
 
 -type bucket() :: klsn:binstr().
+
+-type profile_id() :: atom(). % Can realy be any atom
+
+-type profile() :: #{
+        http_method() | default => #{
+            access_key => access_key()
+          , config => config()
+          , bucket => bucket()
+          , prefix => klsn:binstr()
+          , ttl => non_neg_integer()
+          , region => klsn:binstr()
+        }
+    }.
 
 -type key() :: klsn:binstr().
 
@@ -282,6 +298,49 @@
 
 %% time to live (second) from now
 -type ttl() :: non_neg_integer().
+
+-spec share_urls([profile_id()]) -> #{
+        id => klsn:binstr()
+      , get => klsn:binstr()
+      , put => klsn:binstr()
+    }.
+share_urls([ProfileId|_]) ->
+    % Just use first profile for now
+    Profile = qrpc_conf:get({s3_profile, ProfileId}),
+    Default = maps:get(default, Profile, #{}),
+    Get0 = maps:get(get, Profile, #{}),
+    Get = maps:merge(Default, Get0),
+    Put0 = maps:get(put, Profile, #{}),
+    Put = maps:merge(Default, Put0),
+    % TODO: validate
+    Id = klsn_binstr:uuid(),
+    GetOpts = #{
+        bucket => maps:get(bucket, Get)
+      , key => klsn_binstr:from_any([
+            maps:get(prefix, Get, <<>>)
+          , Id
+          , maps:get(suffix, Get, <<>>)
+        ])
+      , method => get
+      , ttl => maps:get(ttl, Get, 3600)
+      , region => maps:get(region, Get, <<"us-east-1">>)
+    },
+    PutOpts = #{
+        bucket => maps:get(bucket, Put)
+      , key => klsn_binstr:from_any([
+            maps:get(prefix, Put, <<>>)
+          , Id
+          , maps:get(suffix, Put, <<>>)
+        ])
+      , method => put
+      , ttl => maps:get(ttl, Put, 3600)
+      , region => maps:get(region, Put, <<"us-east-1">>)
+    },
+    #{
+        id => Id
+      , get => make_presigned_url(GetOpts, maps:get(access_key, Get), maps:get(config, Get))
+      , put => make_presigned_url(PutOpts, maps:get(access_key, Put), maps:get(config, Put))
+    }.
 
 -spec create_bucket(
         bucket(), create_bucket_opts(), access_key(), config()

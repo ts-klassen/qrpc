@@ -42,13 +42,14 @@
         </button>
         <div class="status">
             <span v-if="error" style="color:#c00">{{ error }}</span>
-            <span v-else-if="loading">リクエスト送信中です…</span>
+            <span v-else-if="loading">{{ statusMessage || '処理中です…' }}</span>
             <span v-else-if="audioUrl">準備完了！下のプレイヤーで再生してください。</span>
         </div>
         <audio v-if="audioUrl" :src="audioUrl" controls></audio>
     </div>
     <script>
         const { createApp } = Vue;
+        const COMPLETE_MESSAGE = 'super_simple_worker:upload_complete';
 
         createApp({
             data() {
@@ -58,7 +59,8 @@
                     loading: false,
                     audioUrl: null,
                     error: null,
-                    activeBlobDescriptor: null
+                    statusMessage: '',
+                    activeEventId: null
                 };
             },
             methods: {
@@ -80,9 +82,11 @@
                     }
                     this.loading = true;
                     this.error = null;
+                    this.audioUrl = null;
+                    this.statusMessage = 'リクエスト送信中です…';
                     try {
                         const response = await this.$qrpc.callRpc({
-                            module: 'q_vvx_engine',
+                            module: 'q_vvx_core',
                             function: 'super_simple_tts',
                             arity: 1,
                             payload: {
@@ -90,39 +94,54 @@
                                 text: this.text
                             }
                         });
-                        const blobDescriptors = response?.blob || [];
-                        const descriptor = blobDescriptors[0] || null;
-                        if (!descriptor) {
-                            throw new Error('音声データが返されませんでした。');
+                        const payload = response?.payload || {};
+                        const presignedUrl = payload.presigned_url;
+                        const eventNamespace = payload.event_namespace;
+                        const eventId = payload.event_id;
+                        if (!presignedUrl || !eventNamespace || !eventId) {
+                            throw new Error('レスポンスが不正です。');
                         }
-                        if (this.audioUrl && this.activeBlobDescriptor) {
-                            this.activeBlobDescriptor.revokeObjectUrl?.(this.audioUrl);
-                        } else if (this.audioUrl) {
-                            URL.revokeObjectURL(this.audioUrl);
+                        this.activeEventId = eventId;
+                        this.statusMessage = '音声生成中です…';
+                        const completion = await this.waitForCompletion(eventNamespace, eventId);
+                        if (!completion) {
+                            return;
                         }
-                        const directUrl = descriptor.toObjectUrl?.();
-                        let audioUrl = directUrl;
-                        if (!audioUrl) {
-                            const buffer = descriptor.arrayBuffer
-                                ? await descriptor.arrayBuffer()
-                                : new ArrayBuffer(0);
-                            const blobInstance = descriptor.blob || new Blob([buffer], {
-                                type: descriptor.contentType || 'audio/wav'
-                            });
-                            audioUrl = URL.createObjectURL(blobInstance);
+                        if (completion.message && completion.message !== COMPLETE_MESSAGE) {
+                            throw new Error('音声生成に失敗しました。');
                         }
-                        if (!audioUrl) {
-                            throw new Error('音声データの準備に失敗しました。');
-                        }
-                        this.audioUrl = audioUrl;
-                        this.activeBlobDescriptor = descriptor;
+                        this.audioUrl = presignedUrl;
                     } catch (error) {
                         this.error = `エラー: ${this.formatError(error)}`;
                         this.audioUrl = null;
-                        this.activeBlobDescriptor = null;
+                        this.activeEventId = null;
                     } finally {
                         this.loading = false;
+                        this.statusMessage = '';
                     }
+                },
+                async waitForCompletion(namespace, eventId) {
+                    const deadline = Date.now() + 120000;
+                    while (Date.now() < deadline) {
+                        if (this.activeEventId !== eventId) {
+                            return null;
+                        }
+                        const response = await this.$qrpc.callRpc({
+                            module: 'qrpc_event',
+                            function: 'fetch',
+                            arity: 1,
+                            payload: {
+                                namespace,
+                                timeout: 1000
+                            }
+                        });
+                        const events = response?.payload || [];
+                        const matched = events.find((event) => event.id === eventId);
+                        if (matched) {
+                            return matched;
+                        }
+                    }
+                    throw new Error('音声生成がタイムアウトしました。');
                 }
             }
         }).use(QrpcVuePlugin).mount('#app');

@@ -27,6 +27,7 @@
              | dlog_config % -> #{atom() => disk_log:dlog_options()}
              | dlog_dir % -> file:filename()
              | kvs_dets_path % -> file:filename()
+             | {s3_profile, qrpc_s3:profile_id()} % -> qrpc_s3:profile()
              | subsystem % -> #{ Subsystem::atom() => #{ module() => term() } }
              | rabbitmq % -> #{ host => klsn:binstr(), port => inet:port_number(), username => klsn:binstr(), password => klsn:binstr(), vhost => klsn:binstr() }
              .
@@ -44,6 +45,7 @@
                | [Role::atom()]
                | file:filename()
                | #{atom() => disk_log:dlog_options()}
+               | qrpc_s3:profile()
                | #{atom() => #{atom() => term()}}
                | #{host => klsn:binstr(), port => inet:port_number(), username => klsn:binstr(), password => klsn:binstr(), vhost => klsn:binstr()}
                .
@@ -78,14 +80,14 @@ get(Key, Default) ->
     end.
 
 -spec lookup(key() | path()) ->  klsn:optnl(value()).
-lookup([Key|Path]) when is_atom(Key) ->
+lookup([Key|Path]) when is_atom(Key); is_tuple(Key) ->
     case application:get_env(qrpc, Key) of
         {ok, Value} ->
             klsn_map:lookup(Path, Value);
         undefined ->
             none
     end;
-lookup(Key) when is_atom(Key) ->
+lookup(Key) when is_atom(Key); is_tuple(Key) ->
     case application:get_env(qrpc, Key) of
         {ok, Value} ->
             {value, Value};
