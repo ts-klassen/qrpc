@@ -19,4 +19,5 @@ rebar3.crashdump
 *~
 ansible/env/real/
 apps/*/crates/*/target
+apps/q_vvx/priv/bin
 aws/terraform/lambda/*.zip
