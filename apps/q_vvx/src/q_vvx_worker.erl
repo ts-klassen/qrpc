@@ -20,7 +20,7 @@ start_link(Index) ->
 
 init(State0 = #{index := Index}) ->
     process_flag(trap_exit, true),
-    Port = open_worker_port(),
+    Port = open_worker_port(Index),
     qrpc_clog:alog(?MODULE, io_lib:format("worker ~p started~n", [Index])),
     {ok, State0#{port => Port}}.
 
@@ -52,9 +52,9 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-open_worker_port() ->
+open_worker_port(Index) ->
     Executable = worker_executable(),
-    open_port({spawn_executable, Executable}, port_options()).
+    open_port({spawn_executable, Executable}, port_options(Index)).
 
 worker_executable() ->
     PrivDir = case code:priv_dir(q_vvx) of
@@ -73,8 +73,21 @@ worker_executable() ->
             error({missing_worker_binary, Path})
     end.
 
-port_options() ->
-    [binary, exit_status, use_stdio, stderr_to_stdout].
+port_options(Index) ->
+    [binary, exit_status, use_stdio, stderr_to_stdout, {args, worker_args(Index)}].
+
+worker_args(Index) ->
+    TagsJson = iolist_to_binary(json:encode(#{
+        q_vvx_worker_index => klsn_binstr:from_any(Index)
+      , qrpc_server_name => qrpc_conf:get(server_name)
+      , q_vvx_vsn => case application:get_key(q_vvx, vsn) of
+            {ok, Vsn} ->
+                klsn_binstr:from_any(Vsn);
+            undefined ->
+                <<"0.0.0">>
+        end
+    })),
+    ["--tlgrf_tags", binary_to_list(TagsJson)].
 
 stop_all() ->
     Port = open_port({spawn_executable, os:find_executable("pkill")}, [
