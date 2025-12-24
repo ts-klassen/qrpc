@@ -10,6 +10,10 @@ data "aws_region" "current" {}
 
 data "aws_caller_identity" "current" {}
 
+data "aws_cloudfront_cache_policy" "managed_caching_optimized" {
+  name = "Managed-CachingOptimized"
+}
+
 data "aws_ami" "ubuntu_jammy_exact" {
   count       = var.ami_name != "" ? 1 : 0
   owners      = [var.ami_owner]
@@ -136,18 +140,7 @@ resource "aws_cloudfront_distribution" "releases" {
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
     compress               = true
-    min_ttl                = 0
-    default_ttl            = 86400
-    max_ttl                = 31536000
-
-    forwarded_values {
-      query_string = false
-      headers      = []
-
-      cookies {
-        forward = "none"
-      }
-    }
+    cache_policy_id        = data.aws_cloudfront_cache_policy.managed_caching_optimized.id
   }
 
   restrictions {
