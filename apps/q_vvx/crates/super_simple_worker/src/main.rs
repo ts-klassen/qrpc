@@ -42,9 +42,11 @@ const EVENT_QUEUE_EXPIRES_MS: i64 = 3_900_000;
 const DEFAULT_TELEGRAF_SOCKET: &str = "/tmp/telegraf.sock";
 const TLGRF_TAGS_ARG: &str = "--tlgrf_tegs";
 const TLGRF_TAGS_ARG_ALT: &str = "--tlgrf_tags";
-const METRICS_JOB: &str = "super_simple_worker_job";
-const METRICS_STARTUP: &str = "super_simple_worker_startup";
-const METRICS_COUNTS: &str = "super_simple_worker_counts";
+const METRICS_MEASUREMENT: &str = "super_simple_worker";
+const METRICS_KIND_TAG: &str = "metric_kind";
+const METRICS_KIND_JOB: &str = "job";
+const METRICS_KIND_STARTUP: &str = "startup";
+const METRICS_KIND_COUNTS: &str = "counts";
 const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main(flavor = "current_thread")]
@@ -555,16 +557,24 @@ struct Metrics {
 impl Metrics {
     fn new(cfg: &Config, synth: &SynthResources, startup: StartupTimings) -> Self {
         let tags = build_metric_tags(cfg, synth);
-        let client = match TelegrafClient::new(DEFAULT_TELEGRAF_SOCKET) {
-            Ok(client) => Some(client),
-            Err(err) => {
-                warn!(
-                    ?err,
-                    socket = %DEFAULT_TELEGRAF_SOCKET,
-                    "metrics disabled: failed to connect to telegraf socket"
-                );
-                None
+        let client = if Path::new(DEFAULT_TELEGRAF_SOCKET).exists() {
+            match TelegrafClient::new(DEFAULT_TELEGRAF_SOCKET) {
+                Ok(client) => Some(client),
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        socket = %DEFAULT_TELEGRAF_SOCKET,
+                        "metrics disabled: failed to connect to telegraf socket"
+                    );
+                    None
+                }
             }
+        } else {
+            info!(
+                socket = %DEFAULT_TELEGRAF_SOCKET,
+                "metrics disabled: telegraf socket not found"
+            );
+            None
         };
 
         let mut metrics = Self {
@@ -595,7 +605,7 @@ impl Metrics {
                 FieldValue::Integer(startup.voice_model_load_ms),
             ),
         ];
-        self.send(METRICS_STARTUP, &fields);
+        self.send(METRICS_KIND_STARTUP, &fields);
     }
 
     fn record_job(&mut self, metrics: JobMetrics) {
@@ -613,7 +623,7 @@ impl Metrics {
             ),
             ("job_duration_ms", FieldValue::Integer(metrics.job_duration_ms)),
         ];
-        self.send(METRICS_JOB, &fields);
+        self.send(METRICS_KIND_JOB, &fields);
     }
 
     fn record_drop(&mut self) {
@@ -637,17 +647,24 @@ impl Metrics {
                 FieldValue::Integer(self.jobs_dropped_total),
             ),
         ];
-        self.send(METRICS_COUNTS, &fields);
+        self.send(METRICS_KIND_COUNTS, &fields);
     }
 
-    fn send(&mut self, measurement: &str, fields: &[(&str, FieldValue<'_>)]) {
-        let tags = self.tag_slice();
+    fn send(&mut self, kind: &str, fields: &[(&str, FieldValue<'_>)]) {
+        let mut tags = self.tag_slice();
+        tags.retain(|(key, _)| *key != METRICS_KIND_TAG);
+        tags.push((METRICS_KIND_TAG, kind));
         let result = match self.client.as_ref() {
-            Some(client) => client.send_metric(measurement, &tags, fields, None),
+            Some(client) => client.send_metric(METRICS_MEASUREMENT, &tags, fields, None),
             None => return,
         };
         if let Err(err) = result {
-            warn!(?err, measurement, "failed to send metric");
+            warn!(
+                ?err,
+                measurement = METRICS_MEASUREMENT,
+                metric_kind = kind,
+                "failed to send metric"
+            );
             self.client = None;
         }
     }
