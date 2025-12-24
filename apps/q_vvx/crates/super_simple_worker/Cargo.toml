@@ -11,6 +11,7 @@ reqwest = { version = "0.11", default-features = false, features = ["json", "rus
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt"] }
+tlgrf = { git = "https://github.com/ts-klassen/tlgrf" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 voicevox_core = { git = "https://github.com/voicevox/voicevox_core.git", tag = "0.16.2", default-features = false, features = ["load-onnxruntime"] }

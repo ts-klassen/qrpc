@@ -2888,6 +2888,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tlgrf",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -3079,6 +3080,11 @@ dependencies = [
  "displaydoc",
  "zerovec",
 ]
+
+[[package]]
+name = "tlgrf"
+version = "0.1.0"
+source = "git+https://github.com/ts-klassen/tlgrf#b6c473e2ce711c07e6b8844885c11512023deb68"
 
 [[package]]
 name = "tokio"
