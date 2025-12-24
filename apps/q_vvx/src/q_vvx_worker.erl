@@ -2,7 +2,10 @@
 
 -behaviour(gen_server).
 
--export([start_link/1]).
+-export([
+        start_link/1
+      , stop_all/0
+    ]).
 -export([
         init/1
       , handle_call/3
@@ -72,3 +75,21 @@ worker_executable() ->
 
 port_options() ->
     [binary, exit_status, use_stdio, stderr_to_stdout].
+
+stop_all() ->
+    Port = open_port({spawn_executable, os:find_executable("pkill")}, [
+        {args, ["-f", worker_executable()]},
+        exit_status
+    ]),
+    wait_for_port_exit(Port),
+    ok.
+
+wait_for_port_exit(Port) ->
+    receive
+        {Port, {data, _Data}} ->
+            wait_for_port_exit(Port);
+        {Port, {exit_status, _Status}} ->
+            ok;
+        {'EXIT', Port, _Reason} ->
+            ok
+    end.
