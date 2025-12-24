@@ -23,6 +23,10 @@ builds a golden AMI with Image Builder. This can add several minutes to
 `terraform apply`. Use `ami_name` to pin a specific image or `ami_name_regex`
 to change the selection filter.
 
+Note: EC2 Spot creates its service-linked role on first use. If `run-instances`
+fails with permissions, allow `iam:CreateServiceLinkedRole` for
+`spot.amazonaws.com` or have an admin pre-create the role once.
+
 ## 2) Launch an instance from the launch template
 ```bash
 INSTANCE_ID=$(aws ec2 run-instances \

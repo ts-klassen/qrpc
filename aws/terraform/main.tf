@@ -1045,6 +1045,16 @@ resource "aws_iam_role_policy" "github_actions" {
       },
       {
         Effect = "Allow",
+        Action = "iam:CreateServiceLinkedRole",
+        Resource = "*",
+        Condition = {
+          StringEquals = {
+            "iam:AWSServiceName" = "spot.amazonaws.com"
+          }
+        }
+      },
+      {
+        Effect = "Allow",
         Action = "iam:PassRole",
         Resource = aws_iam_role.build_instance.arn,
         Condition = {

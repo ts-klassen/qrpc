@@ -63,3 +63,4 @@ terraform output -raw github_actions_role_arn
 - The bootstrap configures CloudWatch Agent to ship `/var/log/qrpc-build.log` to the log group; you can watch with `aws logs tail`.
 - Before running `./Build devel`, the build script pulls the most recent devel tarball from S3 and runs its `install.sh` to avoid rebuilding unchanged packages.
 - Image Builder runs only when Terraform applies; the AMI is not refreshed automatically.
+- Terraform creates the Image Builder service-linked role; Spot creates its service-linked role on first use, so ensure the caller can `iam:CreateServiceLinkedRole` or have an admin pre-create it once.
