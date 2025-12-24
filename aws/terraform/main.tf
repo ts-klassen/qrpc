@@ -114,6 +114,31 @@ resource "aws_cloudfront_origin_access_control" "releases" {
   signing_protocol                  = "sigv4"
 }
 
+resource "aws_cloudfront_cache_policy" "releases" {
+  name        = "${var.project_name}-releases-cache-policy"
+  comment     = "Cache policy for ${var.project_name} releases"
+  default_ttl = 86400
+  max_ttl     = 31536000
+  min_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+
+    headers_config {
+      header_behavior = "none"
+    }
+
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+  }
+}
+
 resource "aws_cloudfront_distribution" "releases" {
   enabled             = true
   comment             = "${var.project_name} release distribution"
@@ -136,14 +161,7 @@ resource "aws_cloudfront_distribution" "releases" {
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
     compress               = true
-
-    forwarded_values {
-      query_string = false
-
-      cookies {
-        forward = "none"
-      }
-    }
+    cache_policy_id        = aws_cloudfront_cache_policy.releases.id
   }
 
   restrictions {
@@ -439,6 +457,15 @@ resource "aws_launch_template" "build" {
 
   iam_instance_profile {
     name = aws_iam_instance_profile.build.name
+  }
+
+  instance_market_options {
+    market_type = "spot"
+
+    spot_options {
+      spot_instance_type             = "one-time"
+      instance_interruption_behavior = "terminate"
+    }
   }
 
   network_interfaces {
