@@ -1,7 +1,8 @@
-2025-10-16  ts-klassen  <qrpc@su-shiki.com>
+2025-12-25  ts-klassen  <qrpc@su-shiki.com>
 
 	* VERSION: 0.1.0
 	* SUBSYSTEM VERSIONS:
 		* qrpc: 0.1.0
-		* q_tut: 0.2.0
+		* q_tut: 0.3.0
+		* q_vvx: 0.1.0
 	Initial setup.
