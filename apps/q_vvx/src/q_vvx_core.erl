@@ -9,6 +9,7 @@
 
 -define(MAX_TEXT_BYTES, 1500).
 -define(MINUTELY_LIMIT, 10000).
+-define(MAX_SPEAKER_ID, 4294967295).
 
 super_simple_tts(Rpc) ->
     Speaker = Rpc:get([payload, <<"id">>]),
@@ -22,7 +23,7 @@ super_simple_tts(Rpc) ->
     } = qrpc_s3:share_urls(?QRPC_SUBCONF_GET(wav_s3_profiles)),
     % FIXME: This creates queue every time. Should use a per-session id
     EventNamespace = klsn_binstr:uuid(),
-    ok = send_job(#{
+    ok = send_job(Speaker, #{
         <<"speaker_id">> => Speaker,
         <<"text">> => Text,
         <<"destination_url">> => PutUrl,
@@ -37,7 +38,11 @@ super_simple_tts(Rpc) ->
         }
     }.
 
-ensure_supported_speaker(3) ->
+% FIXME: Only allow listed user
+ensure_supported_speaker(Speaker)
+    when is_integer(Speaker),
+         Speaker >= 0,
+         Speaker =< ?MAX_SPEAKER_ID ->
     ok;
 ensure_supported_speaker(Speaker) ->
     ?QRPC_ERROR(#{
@@ -73,7 +78,7 @@ ensure_supported_text(Text) ->
     }).
 
 ensure_rate_limit(Text) ->
-    Queue = queue_name(),
+    Queue = rate_limit_key(),
     case qrpc_counter:add({?MODULE, super_simple_tts, Queue}, {slot, minutely}, size(Text)) of
         Count when Count < ?MINUTELY_LIMIT ->
             ok;
@@ -96,16 +101,17 @@ ensure_rate_limit(Text) ->
             })
     end.
 
-send_job(Payload) ->
+send_job(Speaker, Payload) ->
     PrevTrap = process_flag(trap_exit, true),
     {ok, _} = application:ensure_all_started(amqp_client),
     {ok, Conn} = amqp_connection:start(connection_params()),
     try
         {ok, Chan} = amqp_connection:open_channel(Conn),
-        declare_queue(Chan),
-        declare_exchange(Chan),
-        bind_queue(Chan),
-        Queue = queue_name(),
+        Queue = queue_name(Speaker),
+        RoutingKey = routing_key(Speaker),
+        declare_queue(Chan, Queue),
+        declare_exchange(Chan, worker_exchange()),
+        bind_queue(Chan, Queue, worker_exchange(), RoutingKey),
         Body = iolist_to_binary(json:encode(Payload)),
         Msg = #amqp_msg{
             props = #'P_basic'{content_type = <<"application/json">>, delivery_mode = 2},
@@ -113,8 +119,19 @@ send_job(Payload) ->
         },
         ok = amqp_channel:cast(
             Chan,
-            #'basic.publish'{exchange = worker_exchange(), routing_key = Queue},
+            #'basic.publish'{exchange = worker_exchange(), routing_key = RoutingKey},
             Msg
+        ),
+        declare_exchange(Chan, wake_exchange()),
+        WakeBody = iolist_to_binary(json:encode(#{<<"speaker_id">> => Speaker})),
+        WakeMsg = #amqp_msg{
+            props = #'P_basic'{content_type = <<"application/json">>, delivery_mode = 1},
+            payload = WakeBody
+        },
+        ok = amqp_channel:cast(
+            Chan,
+            #'basic.publish'{exchange = wake_exchange(), routing_key = wake_routing_key()},
+            WakeMsg
         ),
         ensure_closed(catch amqp_channel:close(Chan))
     after
@@ -122,11 +139,24 @@ send_job(Payload) ->
         ensure_closed(catch amqp_connection:close(Conn))
     end.
 
-queue_name() ->
-    <<"super_simple_tts">>.
+queue_name(Speaker) ->
+    SpeakerBin = klsn_binstr:from_any(Speaker),
+    <<"q_vvx_tts_", SpeakerBin/binary>>.
+
+routing_key(Speaker) ->
+    klsn_binstr:from_any(Speaker).
 
 worker_exchange() ->
-    <<"super_simple_worker_exchange">>.
+    <<"q_vvx_tts_exchange">>.
+
+wake_exchange() ->
+    <<"q_vvx_tts_wake_exchange">>.
+
+wake_routing_key() ->
+    <<"wake">>.
+
+rate_limit_key() ->
+    <<"q_vvx_tts">>.
 
 connection_params() ->
     Host = qrpc_conf:get([rabbitmq, host], <<"localhost">>),
@@ -149,8 +179,7 @@ ensure_closed({'DOWN', _, process, _, _}) ->
 ensure_closed({error, Reason}) ->
     error(Reason).
 
-declare_queue(Chan) ->
-    Queue = queue_name(),
+declare_queue(Chan, Queue) ->
     case catch amqp_channel:call(Chan, #'queue.declare'{
         queue = Queue,
         durable = true
@@ -161,8 +190,7 @@ declare_queue(Chan) ->
             exit(Reason)
     end.
 
-declare_exchange(Chan) ->
-    Exchange = worker_exchange(),
+declare_exchange(Chan, Exchange) ->
     case catch amqp_channel:call(Chan, #'exchange.declare'{
         exchange = Exchange,
         type = <<"direct">>,
@@ -174,13 +202,11 @@ declare_exchange(Chan) ->
             exit(Reason)
     end.
 
-bind_queue(Chan) ->
-    Queue = queue_name(),
-    Exchange = worker_exchange(),
+bind_queue(Chan, Queue, Exchange, RoutingKey) ->
     case catch amqp_channel:call(Chan, #'queue.bind'{
         queue = Queue,
         exchange = Exchange,
-        routing_key = Queue
+        routing_key = RoutingKey
     }) of
         #'queue.bind_ok'{} ->
             ok;

@@ -65,7 +65,7 @@ worker_executable() ->
         Dir when is_binary(Dir) ->
             binary_to_list(Dir)
     end,
-    Path = filename:join([PrivDir, "bin", "super_simple_worker"]),
+    Path = filename:join([PrivDir, "bin", "q_vvx_worker"]),
     case filelib:is_regular(Path) of
         true ->
             Path;

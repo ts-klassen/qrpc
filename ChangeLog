@@ -1,14 +1,15 @@
 UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 
-	* VERSION: 0.1.1
+	* VERSION: 0.2.0
 	* SUBSYSTEM VERSIONS:
 		* qrpc: 0.1.0
 		* q_tut: 0.3.0
-		* q_vvx: 0.1.0
+		* q_vvx: 0.2.0
 	* PACKAGE VERSIONS:
 		* qrpc-devel: 0.2.0
 		* qrpc-prod: 0.1.0
 	Add pkgconf to qrpc-devel so pkg-config is available for openssl-sys builds.
+	Added q_vvx_worker with per-speaker queue support.
 
 
 2025-12-25  ts-klassen  <qrpc@su-shiki.com>
