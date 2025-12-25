@@ -1,4 +1,4 @@
-DISTNAME=       qrpc-devel-0.1.0
+DISTNAME=       qrpc-devel-0.2.0
 CATEGORIES=     meta-pkgs www
 MASTER_SITES=   # empty
 
@@ -7,6 +7,7 @@ COMMENT=        All you need to build qrpc
 
 DEPENDS+=       rust-bin>=1.90.0:../../lang/rust-bin
 DEPENDS+=       rebar3>=3.24.0:../../devel/rebar3
+DEPENDS+=       pkgconf>=2.4.3:../../devel/pkgconf
 DEPENDS+=       qrpc-prod>=0.1.0:../../meta-pkgs/qrpc-prod
 DEPENDS+=       pkg_tarup>=1.9.1:../../pkgtools/pkg_tarup
 DEPENDS+=       ansible>=12.1.0:../../sysutils/ansible

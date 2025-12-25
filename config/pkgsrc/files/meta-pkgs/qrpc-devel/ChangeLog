@@ -1,0 +1,38 @@
+UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
+
+	* VERSION: 0.2.0
+	* PACKAGE VERSIONS:
+		* rust-bin: 1.90.0
+		* rebar3: 3.24.0
+		* pkgconf: 2.4.3
+		* pkg_tarup: 1.9.1
+		* ansible: 12.1.0
+		* mit-krb5: 1.21.3
+		* qrpc-prod: 0.1.0
+		* cronolog: 1.6.2
+		* duplicity: 3.0.5.1
+		* openssl: 3.6.0
+		* ca-certificates: 20250419
+		* rabbitmq: 3.13.7
+		* voicevox_core: 0.16.2
+		* pkg_install: 20250417
+	Add pkgconf so pkg-config is available for openssl-sys builds.
+
+2025-12-25  ts-klassen  <qrpc@su-shiki.com>
+
+	* VERSION: 0.1.0
+	* PACKAGE VERSIONS:
+		* rust-bin: 1.90.0
+		* rebar3: 3.24.0
+		* pkg_tarup: 1.9.1
+		* ansible: 12.1.0
+		* mit-krb5: 1.21.3
+		* qrpc-prod: 0.1.0
+		* cronolog: 1.6.2
+		* duplicity: 3.0.5.1
+		* openssl: 3.6.0
+		* ca-certificates: 20250419
+		* rabbitmq: 3.13.7
+		* voicevox_core: 0.16.2
+		* pkg_install: 20250417
+	Initial setup.
