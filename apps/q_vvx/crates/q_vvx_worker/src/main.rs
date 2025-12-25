@@ -3,7 +3,8 @@ use std::{
     env,
     fs,
     path::{Path, PathBuf},
-    time::Duration,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -21,6 +22,7 @@ use rand::seq::SliceRandom;
 use reqwest::{header::CONTENT_TYPE, Client, Url};
 use serde::Deserialize;
 use serde_json::json;
+use tlgrf::{FieldValue, TelegrafClient};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -48,21 +50,33 @@ const EVENT_QUEUE_EXPIRES_MS: i64 = 3_900_000;
 const CONFIG_ARG: &str = "--config";
 const TLGRF_TAGS_ARG: &str = "--tlgrf_tegs";
 const TLGRF_TAGS_ARG_ALT: &str = "--tlgrf_tags";
+const DEFAULT_TELEGRAF_SOCKET: &str = "/tmp/telegraf.sock";
+const METRICS_MEASUREMENT: &str = "q_vvx_worker";
+const METRICS_KIND_TAG: &str = "metric_kind";
+const METRICS_KIND_JOB: &str = "job";
+const METRICS_KIND_STARTUP: &str = "startup";
+const METRICS_KIND_COUNTS: &str = "counts";
+const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).compact().init();
 
-    let args = Args::parse()?;
-    let cfg = Config::load(&args.config_path)?;
-    let synth = SynthResources::new(&cfg)?;
+    let Args {
+        config_path,
+        tlgrf_tags,
+    } = Args::parse()?;
+    let cfg = Config::load(&config_path)?;
+    let (synth, startup) = SynthResources::new(&cfg)?;
+    let metrics = Metrics::new(tlgrf_tags, &synth);
+    metrics.record_startup(startup).await;
     let http = Client::builder()
         .timeout(Duration::from_secs(cfg.http_timeout_secs))
         .build()
         .context("failed to build HTTP client")?;
 
-    Worker::new(cfg, synth, http).await?.run().await
+    Worker::new(cfg, synth, http, metrics).await?.run().await
 }
 
 struct Worker {
@@ -73,12 +87,13 @@ struct Worker {
     job_channel: Channel,
     wake_consumer: lapin::Consumer,
     event_publisher: EventPublisher,
+    metrics: Metrics,
     speaker_ids: Vec<u32>,
     current_model: Option<LoadedModel>,
 }
 
 impl Worker {
-    async fn new(cfg: Config, synth: SynthResources, http: Client) -> Result<Self> {
+    async fn new(cfg: Config, synth: SynthResources, http: Client, metrics: Metrics) -> Result<Self> {
         info!(amqp = %cfg.amqp_addr, "starting q_vvx_worker");
 
         let conn = Connection::connect(&cfg.amqp_addr, ConnectionProperties::default())
@@ -207,6 +222,7 @@ impl Worker {
             job_channel,
             wake_consumer,
             event_publisher: EventPublisher::new(event_channel),
+            metrics,
             speaker_ids,
             current_model: None,
         })
@@ -321,6 +337,7 @@ impl Worker {
             Ok(payload) => payload,
             Err(err) => {
                 warn!(?err, "dropping invalid job payload");
+                self.metrics.record_drop().await;
                 return self.ack_delivery(&delivery).await;
             }
         };
@@ -329,6 +346,7 @@ impl Worker {
         let event_id = payload.qrpc_event_id.clone();
         if namespace.trim().is_empty() || event_id.trim().is_empty() {
             warn!("dropping job with invalid event identifiers");
+            self.metrics.record_drop().await;
             return self.ack_delivery(&delivery).await;
         }
 
@@ -336,11 +354,16 @@ impl Worker {
             Ok(job) => job,
             Err(err) => {
                 let message = format_failure_message(&err);
+                self.metrics.record_drop().await;
                 self.ack_delivery(&delivery).await?;
                 self.spawn_event(namespace, event_id, message);
                 return Ok(());
             }
         };
+
+        let job_timer = Instant::now();
+        let text_chars = prepared.text.chars().count() as i64;
+        let text_bytes = prepared.text.len() as i64;
 
         let model_path = match self.cfg.speaker_models.get(&prepared.speaker_id) {
             Some(path) => path.clone(),
@@ -349,11 +372,13 @@ impl Worker {
                     "unknown speaker_id {}",
                     prepared.speaker_id
                 ));
+                self.metrics.record_drop().await;
                 self.ack_delivery(&delivery).await?;
                 self.spawn_event(namespace, event_id, message);
                 return Ok(());
             }
         };
+        let model_tag = model_tag_value(&model_path);
 
         if self
             .current_model
@@ -363,24 +388,40 @@ impl Worker {
         {
             if let Err(err) = self.load_model(prepared.speaker_id, &model_path) {
                 let message = format_failure_message(&format!("model load failed: {err}"));
+                self.metrics.record_drop().await;
                 self.ack_delivery(&delivery).await?;
                 self.spawn_event(namespace, event_id, message);
                 return Ok(());
             }
         }
 
+        let synth_timer = Instant::now();
         let wav = match self.synth.synthesize(&prepared.text, prepared.speaker_id) {
             Ok(wav) => wav,
             Err(err) => {
                 let message = format_failure_message(&format!("synthesis failed: {err}"));
+                self.metrics.record_drop().await;
                 self.ack_delivery(&delivery).await?;
                 self.spawn_event(namespace, event_id, message);
                 return Ok(());
             }
         };
+        let synth_duration_ms = elapsed_ms(synth_timer);
+        let wav_bytes = wav.len() as i64;
 
         self.ack_delivery(&delivery).await?;
-        self.spawn_upload(prepared, wav);
+        self.spawn_upload(
+            prepared,
+            wav,
+            JobTiming {
+                job_start: job_timer,
+                text_chars,
+                text_bytes,
+                synth_duration_ms,
+                wav_bytes,
+                model_tag,
+            },
+        );
         Ok(())
     }
 
@@ -391,16 +432,42 @@ impl Worker {
             .map_err(|err| anyhow!("failed to ack delivery: {err}"))
     }
 
-    fn spawn_upload(&self, job: PreparedJob, wav: Vec<u8>) {
+    fn spawn_upload(&self, job: PreparedJob, wav: Vec<u8>, timing: JobTiming) {
         let http = self.http.clone();
         let publisher = self.event_publisher.clone();
+        let metrics = self.metrics.clone();
         tokio::spawn(async move {
-            let message = match upload_audio(&http, &job.destination, wav).await {
+            let upload_timer = Instant::now();
+            let upload_result = upload_audio(&http, &job.destination, wav).await;
+            let upload_duration_ms = elapsed_ms(upload_timer);
+            let message = match &upload_result {
                 Ok(()) => MESSAGE_ON_COMPLETE.to_string(),
-                Err(err) => format_failure_message(&err),
+                Err(err) => format_failure_message(err),
             };
             if let Err(err) = publisher.publish(&job.namespace, &job.event_id, &message).await {
                 error!(?err, "failed to publish event");
+            }
+
+            match upload_result {
+                Ok(()) => {
+                    let job_duration_ms = elapsed_ms(timing.job_start);
+                    metrics
+                        .record_job(
+                            JobMetrics {
+                                text_chars: timing.text_chars,
+                                text_bytes: timing.text_bytes,
+                                synth_duration_ms: timing.synth_duration_ms,
+                                wav_bytes: timing.wav_bytes,
+                                upload_duration_ms,
+                                job_duration_ms,
+                            },
+                            timing.model_tag,
+                        )
+                        .await;
+                }
+                Err(_) => {
+                    metrics.record_drop().await;
+                }
             }
         });
     }
@@ -450,7 +517,8 @@ struct SynthResources {
 }
 
 impl SynthResources {
-    fn new(cfg: &Config) -> Result<Self> {
+    fn new(cfg: &Config) -> Result<(Self, StartupTimings)> {
+        let startup_timer = Instant::now();
         ensure_exists(&cfg.onnxruntime_path, "onnxruntime library")?;
         ensure_exists(&cfg.dict_path, "open_jtalk dictionary")?;
 
@@ -459,18 +527,35 @@ impl SynthResources {
             .to_str()
             .ok_or_else(|| anyhow!("dictionary path must be valid UTF-8"))?;
 
+        let onnx_timer = Instant::now();
         let ort = Onnxruntime::load_once()
             .filename(&cfg.onnxruntime_path)
             .perform()
             .context("failed to load onnxruntime")?;
+        let onnx_load_ms = elapsed_ms(onnx_timer);
+        let openjtalk_timer = Instant::now();
         let text_analyzer =
             OpenJtalk::new(dict_path_str).context("failed to initialize OpenJTalk")?;
+        let openjtalk_init_ms = elapsed_ms(openjtalk_timer);
+        let synthesizer_timer = Instant::now();
         let synthesizer = Synthesizer::builder(ort)
             .text_analyzer(text_analyzer)
             .build()
             .context("failed to build synthesizer")?;
+        let synthesizer_build_ms = elapsed_ms(synthesizer_timer);
+        let startup_total_ms = elapsed_ms(startup_timer);
 
-        Ok(Self { synthesizer })
+        Ok((
+            Self { synthesizer },
+            StartupTimings {
+                startup_total_ms,
+                onnx_load_ms,
+                openjtalk_init_ms,
+                synthesizer_build_ms,
+                voice_model_open_ms: 0,
+                voice_model_load_ms: 0,
+            },
+        ))
     }
 
     fn synthesize(&self, text: &str, speaker_id: u32) -> Result<Vec<u8>> {
@@ -478,6 +563,204 @@ impl SynthResources {
             .tts(text, StyleId::new(speaker_id))
             .perform()
             .map_err(|err| anyhow!("voice synthesis failed: {err}"))
+    }
+
+    fn is_gpu_mode(&self) -> bool {
+        self.synthesizer.is_gpu_mode()
+    }
+}
+
+struct StartupTimings {
+    startup_total_ms: i64,
+    onnx_load_ms: i64,
+    openjtalk_init_ms: i64,
+    synthesizer_build_ms: i64,
+    voice_model_open_ms: i64,
+    voice_model_load_ms: i64,
+}
+
+struct JobMetrics {
+    text_chars: i64,
+    text_bytes: i64,
+    synth_duration_ms: i64,
+    wav_bytes: i64,
+    upload_duration_ms: i64,
+    job_duration_ms: i64,
+}
+
+struct JobTiming {
+    job_start: Instant,
+    text_chars: i64,
+    text_bytes: i64,
+    synth_duration_ms: i64,
+    wav_bytes: i64,
+    model_tag: String,
+}
+
+#[derive(Clone)]
+struct Metrics {
+    state: Arc<Mutex<MetricsState>>,
+}
+
+struct MetricsState {
+    client: Option<TelegrafClient>,
+    tags: Vec<(String, String)>,
+    jobs_retried_total: i64,
+    jobs_dropped_total: i64,
+}
+
+impl Metrics {
+    fn new(tlgrf_tags: HashMap<String, String>, synth: &SynthResources) -> Self {
+        let tags = build_metric_tags(tlgrf_tags, synth);
+        let client = if Path::new(DEFAULT_TELEGRAF_SOCKET).exists() {
+            match TelegrafClient::new(DEFAULT_TELEGRAF_SOCKET) {
+                Ok(client) => Some(client),
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        socket = %DEFAULT_TELEGRAF_SOCKET,
+                        "metrics disabled: failed to connect to telegraf socket"
+                    );
+                    None
+                }
+            }
+        } else {
+            info!(
+                socket = %DEFAULT_TELEGRAF_SOCKET,
+                "metrics disabled: telegraf socket not found"
+            );
+            None
+        };
+
+        Self {
+            state: Arc::new(Mutex::new(MetricsState {
+                client,
+                tags,
+                jobs_retried_total: 0,
+                jobs_dropped_total: 0,
+            })),
+        }
+    }
+
+    async fn record_startup(&self, startup: StartupTimings) {
+        let fields = [
+            ("startup_total_ms", FieldValue::Integer(startup.startup_total_ms)),
+            ("onnx_load_ms", FieldValue::Integer(startup.onnx_load_ms)),
+            ("openjtalk_init_ms", FieldValue::Integer(startup.openjtalk_init_ms)),
+            (
+                "synthesizer_build_ms",
+                FieldValue::Integer(startup.synthesizer_build_ms),
+            ),
+            (
+                "voice_model_open_ms",
+                FieldValue::Integer(startup.voice_model_open_ms),
+            ),
+            (
+                "voice_model_load_ms",
+                FieldValue::Integer(startup.voice_model_load_ms),
+            ),
+        ];
+        self.send(METRICS_KIND_STARTUP, &fields, None).await;
+    }
+
+    async fn record_job(&self, metrics: JobMetrics, model_tag: String) {
+        let fields = [
+            ("text_chars", FieldValue::Integer(metrics.text_chars)),
+            ("text_bytes", FieldValue::Integer(metrics.text_bytes)),
+            (
+                "synth_duration_ms",
+                FieldValue::Integer(metrics.synth_duration_ms),
+            ),
+            ("wav_bytes", FieldValue::Integer(metrics.wav_bytes)),
+            (
+                "upload_duration_ms",
+                FieldValue::Integer(metrics.upload_duration_ms),
+            ),
+            ("job_duration_ms", FieldValue::Integer(metrics.job_duration_ms)),
+        ];
+        self.send(
+            METRICS_KIND_JOB,
+            &fields,
+            Some(vec![("model".to_string(), model_tag)]),
+        )
+        .await;
+    }
+
+    async fn record_drop(&self) {
+        let mut state = self.state.lock().await;
+        state.jobs_dropped_total += 1;
+        let fields = [
+            (
+                "jobs_retried_total",
+                FieldValue::Integer(state.jobs_retried_total),
+            ),
+            (
+                "jobs_dropped_total",
+                FieldValue::Integer(state.jobs_dropped_total),
+            ),
+        ];
+        state.send(METRICS_KIND_COUNTS, &fields, None);
+    }
+
+    async fn record_retry(&self) {
+        let mut state = self.state.lock().await;
+        state.jobs_retried_total += 1;
+        let fields = [
+            (
+                "jobs_retried_total",
+                FieldValue::Integer(state.jobs_retried_total),
+            ),
+            (
+                "jobs_dropped_total",
+                FieldValue::Integer(state.jobs_dropped_total),
+            ),
+        ];
+        state.send(METRICS_KIND_COUNTS, &fields, None);
+    }
+
+    async fn send(
+        &self,
+        kind: &str,
+        fields: &[(&str, FieldValue<'_>)],
+        extra_tags: Option<Vec<(String, String)>>,
+    ) {
+        let mut state = self.state.lock().await;
+        state.send(kind, fields, extra_tags);
+    }
+}
+
+impl MetricsState {
+    fn send(
+        &mut self,
+        kind: &str,
+        fields: &[(&str, FieldValue<'_>)],
+        extra_tags: Option<Vec<(String, String)>>,
+    ) {
+        let mut tags = self.tags.clone();
+        tags.retain(|(key, _)| key != METRICS_KIND_TAG);
+        if let Some(extra_tags) = extra_tags {
+            for (key, _) in &extra_tags {
+                tags.retain(|(existing, _)| existing != key);
+            }
+            tags.extend(extra_tags);
+        }
+        tags.push((METRICS_KIND_TAG.to_string(), kind.to_string()));
+
+        let tag_refs: Vec<(&str, &str)> =
+            tags.iter().map(|(key, value)| (key.as_str(), value.as_str())).collect();
+        let result = match self.client.as_ref() {
+            Some(client) => client.send_metric(METRICS_MEASUREMENT, &tag_refs, fields, None),
+            None => return,
+        };
+        if let Err(err) = result {
+            warn!(
+                ?err,
+                measurement = METRICS_MEASUREMENT,
+                metric_kind = kind,
+                "failed to send metric"
+            );
+            self.client = None;
+        }
     }
 }
 
@@ -568,11 +851,13 @@ impl EventPublisher {
 #[derive(Debug)]
 struct Args {
     config_path: PathBuf,
+    tlgrf_tags: HashMap<String, String>,
 }
 
 impl Args {
     fn parse() -> Result<Self> {
         let mut config_path = None;
+        let mut tlgrf_tags = HashMap::new();
         let mut args = env::args().skip(1);
         while let Some(arg) = args.next() {
             if arg == CONFIG_ARG {
@@ -590,24 +875,29 @@ impl Args {
             }
 
             if arg == TLGRF_TAGS_ARG || arg == TLGRF_TAGS_ARG_ALT {
-                args.next()
-                    .ok_or_else(|| anyhow!("{arg} requires a JSON object"))?;
+                let value = args.next().ok_or_else(|| {
+                    anyhow!("{arg} requires a JSON object like '{{\"name\":\"prod\"}}'")
+                })?;
+                merge_tlgrf_tags_json(&mut tlgrf_tags, &value)?;
                 continue;
             }
 
             let tags_prefix = format!("{TLGRF_TAGS_ARG}=");
-            if arg.strip_prefix(&tags_prefix).is_some() {
+            if let Some(value) = arg.strip_prefix(&tags_prefix) {
+                merge_tlgrf_tags_json(&mut tlgrf_tags, value)?;
                 continue;
             }
 
             let tags_prefix_alt = format!("{TLGRF_TAGS_ARG_ALT}=");
-            if arg.strip_prefix(&tags_prefix_alt).is_some() {
+            if let Some(value) = arg.strip_prefix(&tags_prefix_alt) {
+                merge_tlgrf_tags_json(&mut tlgrf_tags, value)?;
                 continue;
             }
         }
 
         Ok(Self {
             config_path: config_path.unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_PATH)),
+            tlgrf_tags,
         })
     }
 }
@@ -763,6 +1053,56 @@ fn job_queue_name(speaker_id: u32) -> String {
 
 fn format_failure_message(err: impl std::fmt::Display) -> String {
     format!("{MESSAGE_ON_FAILED}: {err}")
+}
+
+fn build_metric_tags(
+    tlgrf_tags: HashMap<String, String>,
+    synth: &SynthResources,
+) -> Vec<(String, String)> {
+    let mut tags = HashMap::new();
+    tags.insert("host".to_string(), host_tag_value());
+    tags.insert("model".to_string(), "dynamic".to_string());
+    tags.insert("version".to_string(), PACKAGE_VERSION.to_string());
+    tags.insert(
+        "gpu".to_string(),
+        if synth.is_gpu_mode() {
+            "true".to_string()
+        } else {
+            "false".to_string()
+        },
+    );
+    for (key, value) in tlgrf_tags {
+        tags.insert(key, value);
+    }
+    tags.into_iter().collect()
+}
+
+fn host_tag_value() -> String {
+    env::var("HOSTNAME")
+        .or_else(|_| env::var("HOST"))
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+fn model_tag_value(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn merge_tlgrf_tags_json(tags: &mut HashMap<String, String>, input: &str) -> Result<()> {
+    let raw: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(input).context("tlgrf tags must be a JSON object")?;
+    for (key, value) in raw {
+        let value = value
+            .as_str()
+            .ok_or_else(|| anyhow!("tlgrf tag value for '{key}' must be a JSON string"))?;
+        tags.insert(key, value.to_string());
+    }
+    Ok(())
+}
+
+fn elapsed_ms(start: Instant) -> i64 {
+    i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX)
 }
 
 fn resolve_path(
