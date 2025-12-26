@@ -11,7 +11,12 @@
 
 start(_StartType, _StartArgs) ->
     q_vvx_worker:stop_all(),
-    q_vvx_sup:start_link().
+    case q_vvx_core:load_style_map() of
+        {ok, _} ->
+            q_vvx_sup:start_link();
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 stop(_State) ->
     q_vvx_worker:stop_all(),

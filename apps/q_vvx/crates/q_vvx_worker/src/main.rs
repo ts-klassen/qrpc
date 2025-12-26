@@ -32,7 +32,6 @@ use voicevox_core::{
 };
 
 const DEFAULT_CONFIG_PATH: &str = "/opt/qrpc/etc/q_vvx_worker/config.toml";
-const DEFAULT_SPEAKER_LIST_PATH: &str = "/opt/qrpc/etc/q_vvx_worker/speakers.json";
 const DEFAULT_AMQP_ADDR: &str = "amqp://guest:guest@localhost:5672/%2f";
 const DEFAULT_ASSETS_DIR: &str = "/opt/qrpc/pkg/share/voicevox_core";
 const DEFAULT_DICT_DIR: &str = "dict/open_jtalk_dic_utf_8-1.11";
@@ -89,7 +88,7 @@ struct Worker {
     wake_consumer: lapin::Consumer,
     event_publisher: EventPublisher,
     metrics: Metrics,
-    speaker_ids: Vec<u32>,
+    style_ids: Vec<u32>,
     current_model: Option<LoadedModel>,
 }
 
@@ -140,8 +139,8 @@ impl Worker {
             .await
             .context("failed to declare wake exchange")?;
 
-        for speaker_id in cfg.speaker_models.keys() {
-            let queue_name = job_queue_name(*speaker_id);
+        for style_id in cfg.style_models.keys() {
+            let queue_name = job_queue_name(*style_id);
             job_channel
                 .queue_declare(
                     &queue_name,
@@ -158,7 +157,7 @@ impl Worker {
                 .queue_bind(
                     &queue_name,
                     JOB_EXCHANGE,
-                    &speaker_id.to_string(),
+                    &style_id.to_string(),
                     QueueBindOptions::default(),
                     FieldTable::default(),
                 )
@@ -213,7 +212,7 @@ impl Worker {
             .await
             .context("failed to declare qrpc_event exchange")?;
 
-        let speaker_ids = cfg.sorted_speaker_ids();
+        let style_ids = cfg.sorted_style_ids();
 
         Ok(Self {
             cfg,
@@ -224,28 +223,28 @@ impl Worker {
             wake_consumer,
             event_publisher: EventPublisher::new(event_channel),
             metrics,
-            speaker_ids,
+            style_ids,
             current_model: None,
         })
     }
 
     async fn run(mut self) -> Result<()> {
         info!(
-            speakers = self.speaker_ids.len(),
+            styles = self.style_ids.len(),
             "worker ready for jobs"
         );
 
         loop {
-            if let Some(speaker_id) = self.current_model.as_ref().map(|model| model.speaker_id) {
-                if let Some(delivery) = self.try_get_job(speaker_id).await? {
+            if let Some(style_id) = self.current_model.as_ref().map(|model| model.style_id) {
+                if let Some(delivery) = self.try_get_job(style_id).await? {
                     self.process_delivery(delivery).await?;
                     continue;
                 }
             }
 
-            match self.select_speaker_with_messages().await? {
-                Some(speaker_id) => {
-                    if let Some(delivery) = self.try_get_job(speaker_id).await? {
+            match self.select_style_with_messages().await? {
+                Some(style_id) => {
+                    if let Some(delivery) = self.try_get_job(style_id).await? {
                         self.process_delivery(delivery).await?;
                     }
                 }
@@ -256,8 +255,8 @@ impl Worker {
         }
     }
 
-    async fn try_get_job(&self, speaker_id: u32) -> Result<Option<Delivery>> {
-        let queue_name = job_queue_name(speaker_id);
+    async fn try_get_job(&self, style_id: u32) -> Result<Option<Delivery>> {
+        let queue_name = job_queue_name(style_id);
         let message = self
             .job_channel
             .basic_get(
@@ -273,12 +272,12 @@ impl Worker {
         Ok(message.map(|msg| msg.delivery))
     }
 
-    async fn select_speaker_with_messages(&self) -> Result<Option<u32>> {
+    async fn select_style_with_messages(&self) -> Result<Option<u32>> {
         let mut max_count = 0u32;
         let mut candidates = Vec::new();
 
-        for speaker_id in &self.speaker_ids {
-            let queue_name = job_queue_name(*speaker_id);
+        for style_id in &self.style_ids {
+            let queue_name = job_queue_name(*style_id);
             let queue = self
                 .job_channel
                 .queue_declare(
@@ -300,9 +299,9 @@ impl Worker {
             if count > max_count {
                 max_count = count;
                 candidates.clear();
-                candidates.push(*speaker_id);
+                candidates.push(*style_id);
             } else if count == max_count {
-                candidates.push(*speaker_id);
+                candidates.push(*style_id);
             }
         }
 
@@ -366,12 +365,12 @@ impl Worker {
         let text_chars = prepared.text.chars().count() as i64;
         let text_bytes = prepared.text.len() as i64;
 
-        let model_path = match self.cfg.speaker_models.get(&prepared.speaker_id) {
+        let model_path = match self.cfg.style_models.get(&prepared.style_id) {
             Some(path) => path.clone(),
             None => {
                 let message = format_failure_message(&format!(
-                    "unknown speaker_id {}",
-                    prepared.speaker_id
+                    "unknown style_id {}",
+                    prepared.style_id
                 ));
                 self.metrics.record_drop().await;
                 self.ack_delivery(&delivery).await?;
@@ -384,10 +383,10 @@ impl Worker {
         if self
             .current_model
             .as_ref()
-            .map(|model| model.speaker_id)
-            != Some(prepared.speaker_id)
+            .map(|model| model.style_id)
+            != Some(prepared.style_id)
         {
-            if let Err(err) = self.load_model(prepared.speaker_id, &model_path) {
+            if let Err(err) = self.load_model(prepared.style_id, &model_path) {
                 let message = format_failure_message(&format!("model load failed: {err}"));
                 self.metrics.record_drop().await;
                 self.ack_delivery(&delivery).await?;
@@ -397,7 +396,7 @@ impl Worker {
         }
 
         let synth_timer = Instant::now();
-        let wav = match self.synth.synthesize(&prepared.text, prepared.speaker_id) {
+        let wav = match self.synth.synthesize(&prepared.text, prepared.style_id) {
             Ok(wav) => wav,
             Err(err) => {
                 let message = format_failure_message(&format!("synthesis failed: {err}"));
@@ -482,7 +481,7 @@ impl Worker {
         });
     }
 
-    fn load_model(&mut self, speaker_id: u32, model_path: &Path) -> Result<()> {
+    fn load_model(&mut self, style_id: u32, model_path: &Path) -> Result<()> {
         if let Some(current) = self.current_model.take() {
             if let Err(err) = self.synth.synthesizer.unload_voice_model(current.model_id) {
                 warn!(?err, "failed to unload previous model");
@@ -499,7 +498,7 @@ impl Worker {
         let model_id = model_file.id();
 
         self.current_model = Some(LoadedModel {
-            speaker_id,
+            style_id,
             model_id,
         });
         Ok(())
@@ -507,7 +506,7 @@ impl Worker {
 }
 
 struct LoadedModel {
-    speaker_id: u32,
+    style_id: u32,
     model_id: VoiceModelId,
 }
 
@@ -557,9 +556,9 @@ impl SynthResources {
         ))
     }
 
-    fn synthesize(&self, text: &str, speaker_id: u32) -> Result<Vec<u8>> {
+    fn synthesize(&self, text: &str, style_id: u32) -> Result<Vec<u8>> {
         self.synthesizer
-            .tts(text, StyleId::new(speaker_id))
+            .tts(text, StyleId::new(style_id))
             .perform()
             .map_err(|err| anyhow!("voice synthesis failed: {err}"))
     }
@@ -892,18 +891,6 @@ struct FileConfig {
     dict_path: Option<PathBuf>,
     onnxruntime_path: Option<PathBuf>,
     http_timeout_secs: Option<u64>,
-    speaker_list_path: Option<PathBuf>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SpeakerConfig {
-    id: u32,
-    model: PathBuf,
-}
-
-#[derive(Debug, Deserialize)]
-struct SpeakerListConfig {
-    speakers: Vec<SpeakerConfig>,
 }
 
 struct Config {
@@ -911,7 +898,7 @@ struct Config {
     dict_path: PathBuf,
     onnxruntime_path: PathBuf,
     http_timeout_secs: u64,
-    speaker_models: HashMap<u32, PathBuf>,
+    style_models: HashMap<u32, PathBuf>,
 }
 
 impl Config {
@@ -926,7 +913,6 @@ impl Config {
             dict_path,
             onnxruntime_path,
             http_timeout_secs,
-            speaker_list_path,
         } = cfg;
 
         let assets_dir = assets_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_ASSETS_DIR));
@@ -941,68 +927,19 @@ impl Config {
         };
         let http_timeout_secs = http_timeout_secs.unwrap_or(DEFAULT_HTTP_TIMEOUT_SECS);
 
-        let speaker_entries = match speaker_list_path {
-            Some(path_value) => {
-                let list_path =
-                    resolve_config_path(path, Some(path_value), Some(DEFAULT_SPEAKER_LIST_PATH))?;
-                load_speaker_list(&list_path)?
-            }
-            None => {
-                let default_list_path =
-                    resolve_config_path(path, None, Some(DEFAULT_SPEAKER_LIST_PATH))?;
-                if default_list_path.exists() {
-                    load_speaker_list(&default_list_path)?
-                } else {
-                    bail!(
-                        "config must include speaker_list_path, and {} must exist",
-                        DEFAULT_SPEAKER_LIST_PATH
-                    );
-                }
-            }
-        };
-
-        let mut speaker_models = HashMap::new();
-        let mut vvm_style_cache: HashMap<PathBuf, HashSet<u32>> = HashMap::new();
-        if speaker_entries.is_empty() {
-            bail!("config must include at least one speaker entry");
-        }
-        for speaker in speaker_entries {
-            if speaker_models.contains_key(&speaker.id) {
-                bail!("duplicate speaker id {} in config", speaker.id);
-            }
-            let model_path = resolve_path(&assets_dir, Some(speaker.model), None)?;
-            ensure_exists(&model_path, "voice model")?;
-            let style_ids = match vvm_style_cache.get(&model_path) {
-                Some(ids) => ids,
-                None => {
-                    let ids = collect_style_ids(&model_path)?;
-                    vvm_style_cache.insert(model_path.clone(), ids);
-                    vvm_style_cache
-                        .get(&model_path)
-                        .ok_or_else(|| anyhow!("failed to cache style ids"))?
-                }
-            };
-            if !style_ids.contains(&speaker.id) {
-                bail!(
-                    "speaker id {} not found in voice model {}",
-                    speaker.id,
-                    model_path.display()
-                );
-            }
-            speaker_models.insert(speaker.id, model_path);
-        }
+        let style_models = discover_style_models(&assets_dir)?;
 
         Ok(Self {
             amqp_addr: amqp_addr.unwrap_or_else(|| DEFAULT_AMQP_ADDR.to_string()),
             dict_path,
             onnxruntime_path,
             http_timeout_secs,
-            speaker_models,
+            style_models,
         })
     }
 
-    fn sorted_speaker_ids(&self) -> Vec<u32> {
-        let mut ids: Vec<u32> = self.speaker_models.keys().copied().collect();
+    fn sorted_style_ids(&self) -> Vec<u32> {
+        let mut ids: Vec<u32> = self.style_models.keys().copied().collect();
         ids.sort_unstable();
         ids
     }
@@ -1010,7 +947,7 @@ impl Config {
 
 #[derive(Debug, Deserialize)]
 struct JobPayload {
-    speaker_id: u32,
+    style_id: u32,
     text: String,
     destination_url: String,
     qrpc_event_namespace: String,
@@ -1035,7 +972,7 @@ impl JobPayload {
             Url::parse(&self.destination_url).context("invalid destination_url")?;
 
         Ok(PreparedJob {
-            speaker_id: self.speaker_id,
+            style_id: self.style_id,
             text: self.text,
             destination,
             namespace: self.qrpc_event_namespace,
@@ -1045,7 +982,7 @@ impl JobPayload {
 }
 
 struct PreparedJob {
-    speaker_id: u32,
+    style_id: u32,
     text: String,
     destination: Url,
     namespace: String,
@@ -1075,8 +1012,8 @@ async fn upload_audio(http: &Client, destination: &Url, wav: Vec<u8>) -> Result<
     }
 }
 
-fn job_queue_name(speaker_id: u32) -> String {
-    format!("{JOB_QUEUE_PREFIX}{speaker_id}")
+fn job_queue_name(style_id: u32) -> String {
+    format!("{JOB_QUEUE_PREFIX}{style_id}")
 }
 
 fn format_failure_message(err: impl std::fmt::Display) -> String {
@@ -1151,53 +1088,12 @@ fn resolve_path(
     }
 }
 
-fn resolve_config_path(
-    config_path: &Path,
-    value: Option<PathBuf>,
-    default_path: Option<&str>,
-) -> Result<PathBuf> {
-    if let Some(path) = value {
-        if path.is_absolute() {
-            return Ok(path);
-        }
-        if let Some(base) = config_path.parent() {
-            return Ok(base.join(path));
-        }
-        return Ok(path);
-    }
-
-    match default_path {
-        Some(default) => {
-            let default_path = Path::new(default);
-            if default_path.is_absolute() {
-                Ok(default_path.to_path_buf())
-            } else if let Some(base) = config_path.parent() {
-                Ok(base.join(default_path))
-            } else {
-                Ok(PathBuf::from(default))
-            }
-        }
-        None => bail!("path is required"),
-    }
-}
-
 fn ensure_exists(path: &Path, label: &str) -> Result<()> {
     if path.exists() {
         Ok(())
     } else {
         bail!("{label} not found at {}", path.display());
     }
-}
-
-fn load_speaker_list(path: &Path) -> Result<Vec<SpeakerConfig>> {
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("failed to read speaker list at {}", path.display()))?;
-    let list: SpeakerListConfig =
-        serde_json::from_str(&raw).context("failed to parse speaker list")?;
-    if list.speakers.is_empty() {
-        bail!("speaker list at {} must include at least one entry", path.display());
-    }
-    Ok(list.speakers)
 }
 
 fn collect_style_ids(model_path: &Path) -> Result<HashSet<u32>> {
@@ -1216,4 +1112,49 @@ fn collect_style_ids(model_path: &Path) -> Result<HashSet<u32>> {
         );
     }
     Ok(ids)
+}
+
+fn discover_style_models(assets_dir: &Path) -> Result<HashMap<u32, PathBuf>> {
+    let models_dir = assets_dir.join("models").join("vvms");
+    let entries = fs::read_dir(&models_dir)
+        .with_context(|| format!("failed to read voice model directory {}", models_dir.display()))?;
+    let mut style_models: HashMap<u32, PathBuf> = HashMap::new();
+    let mut found_model = false;
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("vvm") {
+            continue;
+        }
+        found_model = true;
+        let style_ids = collect_style_ids(&path)?;
+        for style_id in style_ids {
+            if let Some(existing) = style_models.get(&style_id) {
+                bail!(
+                    "style id {} found in multiple models: {} and {}",
+                    style_id,
+                    existing.display(),
+                    path.display()
+                );
+            }
+            style_models.insert(style_id, path.clone());
+        }
+    }
+
+    if !found_model {
+        bail!(
+            "no voice models found in {}",
+            models_dir.display()
+        );
+    }
+
+    if style_models.is_empty() {
+        bail!(
+            "no style ids found in voice models under {}",
+            models_dir.display()
+        );
+    }
+
+    Ok(style_models)
 }

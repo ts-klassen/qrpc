@@ -30,7 +30,7 @@ Jobs are JSON blobs published to `QUEUE_NAME` with the following shape:
 
 ```json
 {
-  "speaker_id": 3,
+  "style_id": 3,
   "text": "こんにちは！",
   "destination_url": "https://example.s3.amazonaws.com/presigned-put",
   "qrpc_event_namespace": "namespace",
@@ -48,7 +48,7 @@ Environment variables:
 | `VOICEVOX_DICT` | `$VOICEVOX_ASSETS/dict/open_jtalk_dic_utf_8-1.11` | Override dictionary path |
 | `VOICEVOX_MODEL` | `$VOICEVOX_ASSETS/models/vvms/0.vvm` | Voice model file to load |
 | `VOICEVOX_ORT_LIB` | `$VOICEVOX_ASSETS/onnxruntime/lib/<libvoicevox_onnxruntime>` | Path to the VOICEVOX onnxruntime shared library |
-| `EXPECTED_SPEAKER_ID` | `3` | Reject jobs whose `speaker_id` differs |
+| `EXPECTED_STYLE_ID` | `3` | Reject jobs whose `style_id` differs |
 
 If multiple workers are desired, run additional OS processes; each worker keeps a single-threaded tokio runtime to accommodate the blocking VOICEVOX Core APIs.
 
@@ -71,7 +71,7 @@ Queue = <<"super_simple_tts">>,
 #'queue.declare_ok'{} =
     amqp_channel:call(Chan, #'queue.declare'{queue = Queue, durable = true}),
 Payload = json:encode(#{
-    <<"speaker_id">> => 3,
+    <<"style_id">> => 3,
     <<"text">> => <<"こんにちは VOICEVOX!">>,
     <<"destination_url">> => <<"https://example.com/presigned-put-url">>,
     <<"qrpc_event_namespace">> => <<"demo_namespace">>,

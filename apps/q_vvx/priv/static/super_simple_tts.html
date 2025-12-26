@@ -32,7 +32,7 @@
     <div id="app">
         <h1>超シンプル音声合成</h1>
         <p><strong>VOICEVOX:ずんだもん</strong><br>ずんだもん は ＳＳＳ合同会社 の登録商標または商標です。</p>
-        <p>現在は話者 ID 3（ずんだもん）に固定されています。</p>
+        <p>現在はスタイル ID 3（ずんだもん）に固定されています。</p>
         <label>
             読み上げるテキスト
             <textarea v-model="text" placeholder="ここにテキストを入力してください"></textarea>
@@ -55,7 +55,7 @@
             data() {
                 return {
                     text: 'こんにちは、世界！',
-                    speakerId: 3,
+                    styleId: 3,
                     loading: false,
                     audioUrl: null,
                     error: null,
@@ -90,7 +90,7 @@
                             function: 'super_simple_tts',
                             arity: 1,
                             payload: {
-                                id: this.speakerId,
+                                style_id: this.styleId,
                                 text: this.text
                             }
                         });

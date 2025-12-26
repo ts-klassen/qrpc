@@ -36,7 +36,7 @@ const EVENT_EXCHANGE: &str = "qrpc_event_exchange";
 const WORKER_EXCHANGE: &str = "super_simple_worker_exchange";
 const MESSAGE_ON_COMPLETE: &str = "super_simple_worker:upload_complete";
 const MAX_TEXT_BYTES: usize = 1500;
-const EXPECTED_SPEAKER_ID: u32 = 3;
+const EXPECTED_STYLE_ID: u32 = 3;
 const EVENT_QUEUE_TTL_MS: i64 = 3_600_000;
 const EVENT_QUEUE_EXPIRES_MS: i64 = 3_900_000;
 const DEFAULT_TELEGRAF_SOCKET: &str = "/tmp/telegraf.sock";
@@ -247,7 +247,7 @@ impl Worker {
 
     async fn run_job(&mut self, channel: &Channel, job: PreparedJob) -> JobResult<()> {
         let PreparedJob {
-            speaker_id,
+            style_id,
             text,
             destination,
             namespace,
@@ -264,7 +264,7 @@ impl Worker {
             "processing job"
         );
         let synth_timer = Instant::now();
-        let wav = self.synth.synthesize(&text, speaker_id)?;
+        let wav = self.synth.synthesize(&text, style_id)?;
         let synth_duration_ms = elapsed_ms(synth_timer);
         let wav_bytes = wav.len() as i64;
         info!(
@@ -406,7 +406,7 @@ impl Worker {
 struct Config {
     amqp_addr: String,
     queue_name: String,
-    expected_speaker_id: u32,
+    expected_style_id: u32,
     dict_path: PathBuf,
     voice_model_path: PathBuf,
     ort_lib_path: PathBuf,
@@ -434,21 +434,21 @@ impl Config {
                     .join("lib")
                     .join(Onnxruntime::LIB_VERSIONED_FILENAME)
             });
-        let expected_speaker_id = env::var("EXPECTED_SPEAKER_ID")
+        let expected_style_id = env::var("EXPECTED_STYLE_ID")
             .ok()
             .map(|value| {
                 value
                     .parse::<u32>()
-                    .context("EXPECTED_SPEAKER_ID must be an unsigned integer")
+                    .context("EXPECTED_STYLE_ID must be an unsigned integer")
             })
             .transpose()?
-            .unwrap_or(EXPECTED_SPEAKER_ID);
+            .unwrap_or(EXPECTED_STYLE_ID);
         let tlgrf_tags = parse_tlgrf_tags_from_args()?;
 
         Ok(Self {
             amqp_addr,
             queue_name,
-            expected_speaker_id,
+            expected_style_id,
             dict_path,
             voice_model_path,
             ort_lib_path,
@@ -517,9 +517,9 @@ impl SynthResources {
         ))
     }
 
-    fn synthesize(&self, text: &str, speaker_id: u32) -> JobResult<Vec<u8>> {
+    fn synthesize(&self, text: &str, style_id: u32) -> JobResult<Vec<u8>> {
         self.synthesizer
-            .tts(text, StyleId::new(speaker_id))
+            .tts(text, StyleId::new(style_id))
             .perform()
             .map_err(|err| JobError::retryable(anyhow!("voice synthesis failed: {err}")))
     }
@@ -679,7 +679,7 @@ impl Metrics {
 
 #[derive(Debug, Deserialize)]
 struct JobPayload {
-    speaker_id: u32,
+    style_id: u32,
     text: String,
     destination_url: String,
     qrpc_event_namespace: String,
@@ -688,11 +688,11 @@ struct JobPayload {
 
 impl JobPayload {
     fn prepare(self, cfg: &Config) -> JobResult<PreparedJob> {
-        if self.speaker_id != cfg.expected_speaker_id {
+        if self.style_id != cfg.expected_style_id {
             return Err(JobError::invalid(anyhow!(
-                "unexpected speaker_id {} (expected {})",
-                self.speaker_id,
-                cfg.expected_speaker_id
+                "unexpected style_id {} (expected {})",
+                self.style_id,
+                cfg.expected_style_id
             )));
         }
 
@@ -724,7 +724,7 @@ impl JobPayload {
         }
 
         Ok(PreparedJob {
-            speaker_id: self.speaker_id,
+            style_id: self.style_id,
             text: self.text,
             destination,
             namespace: self.qrpc_event_namespace,
@@ -734,7 +734,7 @@ impl JobPayload {
 }
 
 struct PreparedJob {
-    speaker_id: u32,
+    style_id: u32,
     text: String,
     destination: Url,
     namespace: String,

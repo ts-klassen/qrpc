@@ -1,7 +1,7 @@
 q_vvx_worker
 ============
 
-VOICEVOX Core worker for per-speaker RabbitMQ queues with dynamic model loading.
+VOICEVOX Core worker for per-style RabbitMQ queues with dynamic model loading.
 
 Configuration
 -------------
@@ -15,7 +15,6 @@ Example config:
 amqp_addr = "amqp://guest:guest@localhost:5672/%2f"
 assets_dir = "/opt/qrpc/pkg/share/voicevox_core"
 http_timeout_secs = 30
-speaker_list_path = "/opt/qrpc/etc/q_vvx_worker/speakers.json"
 
 # Optional overrides for assets_dir-relative paths
 # dict_path = "dict/open_jtalk_dic_utf_8-1.11"
@@ -23,18 +22,5 @@ speaker_list_path = "/opt/qrpc/etc/q_vvx_worker/speakers.json"
 ```
 
 Paths can be absolute or relative to `assets_dir`.
-`speaker_list_path` is resolved relative to the directory containing `config.toml`.
-Model paths in the speaker list follow the `assets_dir` rule.
-
-`speaker_list_path` is required if the default `speakers.json` does not exist.
-
-Speaker list (JSON):
-
-```json
-{
-  "speakers": [
-    { "id": 3, "model": "models/vvms/0.vvm" },
-    { "id": 8, "model": "models/vvms/1.vvm" }
-  ]
-}
-```
+The worker discovers every `*.vvm` under `assets_dir/models/vvms` and uses VOICEVOX Core
+metadata to map style IDs to their voice model files.

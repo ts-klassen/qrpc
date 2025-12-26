@@ -9,13 +9,15 @@
 
 -define(MAX_TEXT_BYTES, 1500).
 -define(MINUTELY_LIMIT, 10000).
--define(MAX_SPEAKER_ID, 4294967295).
--define(DEFAULT_SPEAKER_LIST_PATH, <<"/opt/qrpc/etc/q_vvx_worker/speakers.json">>).
--define(SPEAKER_LIST_CACHE_KEY, {?MODULE, speaker_list}).
+-define(MAX_STYLE_ID, 4294967295).
+-define(DEFAULT_MODELS_PATH, <<"/opt/qrpc/pkg/etc/voicevox_core/models.json">>).
+-define(STYLE_LIST_CACHE_KEY, {?MODULE, style_list}).
+
+-export([load_style_map/0]).
 
 super_simple_tts(Rpc) ->
-    Speaker = Rpc:get([payload, <<"id">>]),
-    ensure_supported_speaker(Speaker),
+    StyleId = Rpc:get([payload, <<"style_id">>]),
+    ensure_supported_style(StyleId),
     Text = Rpc:get([payload, <<"text">>]),
     ensure_supported_text(Text),
     ensure_rate_limit(Text),
@@ -25,8 +27,8 @@ super_simple_tts(Rpc) ->
     } = qrpc_s3:share_urls(?QRPC_SUBCONF_GET(wav_s3_profiles)),
     % FIXME: This creates queue every time. Should use a per-session id
     EventNamespace = klsn_binstr:uuid(),
-    ok = send_job(Speaker, #{
-        <<"speaker_id">> => Speaker,
+    ok = send_job(StyleId, #{
+        <<"style_id">> => StyleId,
         <<"text">> => Text,
         <<"destination_url">> => PutUrl,
         <<"qrpc_event_namespace">> => EventNamespace,
@@ -41,23 +43,23 @@ super_simple_tts(Rpc) ->
     }.
 
 % FIXME: Only allow listed user
-ensure_supported_speaker(Speaker)
-    when is_integer(Speaker),
-         Speaker >= 0,
-         Speaker =< ?MAX_SPEAKER_ID ->
-    case supported_speaker_map() of
-        {ok, Speakers} ->
-            case maps:is_key(Speaker, Speakers) of
+ensure_supported_style(StyleId)
+    when is_integer(StyleId),
+         StyleId >= 0,
+         StyleId =< ?MAX_STYLE_ID ->
+    case supported_style_map() of
+        {ok, Styles} ->
+            case maps:is_key(StyleId, Styles) of
                 true ->
                     ok;
                 false ->
                     ?QRPC_ERROR(#{
-                        id => [q_vvx, core, super_simple_tts, unsupported_speaker]
+                        id => [q_vvx, core, super_simple_tts, unsupported_style]
                       , fault_source => client
-                      , message => <<"Unsupported speaker">>
-                      , message_ja => <<"未対応の話者です"/utf8>>
+                      , message => <<"Unsupported style">>
+                      , message_ja => <<"未対応のスタイルです"/utf8>>
                       , detail => #{
-                            speaker => Speaker
+                            style_id => StyleId
                         }
                       , is_known => true
                       , is_retryable => false
@@ -66,49 +68,49 @@ ensure_supported_speaker(Speaker)
             end;
         {error, Reason} ->
             ?QRPC_ERROR(#{
-                id => [q_vvx, core, super_simple_tts, speaker_list_unavailable]
+                id => [q_vvx, core, super_simple_tts, style_list_unavailable]
               , fault_source => server
-              , message => <<"Speaker list unavailable">>
-              , message_ja => <<"話者一覧の読み込みに失敗しました"/utf8>>
+              , message => <<"Style list unavailable">>
+              , message_ja => <<"スタイル一覧の読み込みに失敗しました"/utf8>>
               , detail => #{
                     reason => Reason
-                  , path => speaker_list_path()
+                  , path => models_path()
                 }
               , is_known => true
               , is_retryable => false
               , version => 1
             })
     end;
-ensure_supported_speaker(Speaker) ->
+ensure_supported_style(StyleId) ->
     ?QRPC_ERROR(#{
-        id => [q_vvx, core, super_simple_tts, unsupported_speaker]
+        id => [q_vvx, core, super_simple_tts, unsupported_style]
       , fault_source => client
-      , message => <<"Unsupported speaker">>
-      , message_ja => <<"未対応の話者です"/utf8>>
+      , message => <<"Unsupported style">>
+      , message_ja => <<"未対応のスタイルです"/utf8>>
       , detail => #{
-            speaker => Speaker
+            style_id => StyleId
         }
       , is_known => true
       , is_retryable => false
       , version => 1
     }).
 
-supported_speaker_map() ->
-    case persistent_term:get(?SPEAKER_LIST_CACHE_KEY, undefined) of
-        {ok, Speakers} ->
-            {ok, Speakers};
+supported_style_map() ->
+    case persistent_term:get(?STYLE_LIST_CACHE_KEY, undefined) of
+        {ok, Styles} ->
+            {ok, Styles};
         undefined ->
-            load_speaker_map()
+            load_style_map()
     end.
 
-load_speaker_map() ->
-    Path = speaker_list_path(),
+load_style_map() ->
+    Path = models_path(),
     case file:read_file(Path) of
         {ok, Binary} ->
-            case parse_speaker_list(Binary, Path) of
-                {ok, Speakers} ->
-                    persistent_term:put(?SPEAKER_LIST_CACHE_KEY, {ok, Speakers}),
-                    {ok, Speakers};
+            case parse_models(Binary, Path) of
+                {ok, Styles} ->
+                    persistent_term:put(?STYLE_LIST_CACHE_KEY, {ok, Styles}),
+                    {ok, Styles};
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -116,16 +118,16 @@ load_speaker_map() ->
             {error, {read_failed, Path, Reason}}
     end.
 
-parse_speaker_list(Binary, Path) ->
+parse_models(Binary, Path) ->
     try json:decode(Binary) of
-        #{<<"speakers">> := Speakers} when is_list(Speakers) ->
-            case build_speaker_map(Speakers, #{}) of
+        Models when is_map(Models) ->
+            case build_style_map(Models, Path) of
                 {ok, Map} when map_size(Map) > 0 ->
                     {ok, Map};
                 {ok, _} ->
                     {error, {empty_list, Path}};
                 {error, Reason} ->
-                    {error, {invalid_entry, Path, Reason}}
+                    {error, Reason}
             end;
         _ ->
             {error, {invalid_format, Path}}
@@ -133,24 +135,55 @@ parse_speaker_list(Binary, Path) ->
         {error, {decode_failed, Path, Class, Reason}}
     end.
 
-build_speaker_map([], Acc) ->
+build_style_map(Models, Path) ->
+    maps:fold(
+        fun(_, Value, {ok, Acc}) ->
+            case Value of
+                #{<<"metas">> := Metas} ->
+                    add_styles_from_metas(Metas, Acc, Path);
+                _ ->
+                    {error, {invalid_entry, Path, Value}}
+            end;
+           (_, _, Error = {error, _}) ->
+                Error
+        end,
+        {ok, #{}},
+        Models
+    ).
+
+add_styles_from_metas(Metas, Acc, Path) when is_list(Metas) ->
+    lists:foldl(
+        fun(Character, {ok, Map}) ->
+            case Character of
+                #{<<"styles">> := Styles} when is_list(Styles) ->
+                    add_style_ids(Styles, Map, Path);
+                _ ->
+                    {error, {invalid_metas, Path, Character}}
+            end;
+           (_, Error = {error, _}) ->
+                Error
+        end,
+        {ok, Acc},
+        Metas
+    );
+add_styles_from_metas(_, _Acc, Path) ->
+    {error, {invalid_metas, Path}}.
+
+add_style_ids([], Acc, _Path) ->
     {ok, Acc};
-build_speaker_map([Speaker | Rest], Acc) ->
-    case Speaker of
+add_style_ids([Style | Rest], Acc, Path) ->
+    case Style of
         #{<<"id">> := Id}
             when is_integer(Id),
                  Id >= 0,
-                 Id =< ?MAX_SPEAKER_ID ->
-            build_speaker_map(Rest, maps:put(Id, true, Acc));
+                 Id =< ?MAX_STYLE_ID ->
+            add_style_ids(Rest, maps:put(Id, true, Acc), Path);
         _ ->
-            {error, Speaker}
+            {error, {invalid_style, Path, Style}}
     end.
 
-speaker_list_path() ->
-    qrpc_conf:get(
-        [subsystem, q_vvx, q_vvx_core, speaker_list_path],
-        ?DEFAULT_SPEAKER_LIST_PATH
-    ).
+models_path() ->
+    ?DEFAULT_MODELS_PATH.
 
 ensure_supported_text(Text)
     when is_binary(Text),
@@ -195,14 +228,14 @@ ensure_rate_limit(Text) ->
             })
     end.
 
-send_job(Speaker, Payload) ->
+send_job(StyleId, Payload) ->
     PrevTrap = process_flag(trap_exit, true),
     {ok, _} = application:ensure_all_started(amqp_client),
     {ok, Conn} = amqp_connection:start(connection_params()),
     try
         {ok, Chan} = amqp_connection:open_channel(Conn),
-        Queue = queue_name(Speaker),
-        RoutingKey = routing_key(Speaker),
+        Queue = queue_name(StyleId),
+        RoutingKey = routing_key(StyleId),
         declare_queue(Chan, Queue),
         declare_exchange(Chan, worker_exchange()),
         bind_queue(Chan, Queue, worker_exchange(), RoutingKey),
@@ -217,7 +250,7 @@ send_job(Speaker, Payload) ->
             Msg
         ),
         declare_exchange(Chan, wake_exchange()),
-        WakeBody = iolist_to_binary(json:encode(#{<<"speaker_id">> => Speaker})),
+        WakeBody = iolist_to_binary(json:encode(#{<<"style_id">> => StyleId})),
         WakeMsg = #amqp_msg{
             props = #'P_basic'{content_type = <<"application/json">>, delivery_mode = 1},
             payload = WakeBody
@@ -233,12 +266,12 @@ send_job(Speaker, Payload) ->
         ensure_closed(catch amqp_connection:close(Conn))
     end.
 
-queue_name(Speaker) ->
-    SpeakerBin = klsn_binstr:from_any(Speaker),
-    <<"q_vvx_tts_", SpeakerBin/binary>>.
+queue_name(StyleId) ->
+    StyleBin = klsn_binstr:from_any(StyleId),
+    <<"q_vvx_tts_", StyleBin/binary>>.
 
-routing_key(Speaker) ->
-    klsn_binstr:from_any(Speaker).
+routing_key(StyleId) ->
+    klsn_binstr:from_any(StyleId).
 
 worker_exchange() ->
     <<"q_vvx_tts_exchange">>.
