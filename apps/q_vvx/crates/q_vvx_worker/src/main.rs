@@ -500,7 +500,6 @@ impl Worker {
         self.current_model = Some(LoadedModel {
             speaker_id,
             model_id,
-            model_file,
         });
         Ok(())
     }
@@ -509,7 +508,6 @@ impl Worker {
 struct LoadedModel {
     speaker_id: u32,
     model_id: VoiceModelId,
-    model_file: VoiceModelFile,
 }
 
 struct SynthResources {
@@ -689,22 +687,6 @@ impl Metrics {
     async fn record_drop(&self) {
         let mut state = self.state.lock().await;
         state.jobs_dropped_total += 1;
-        let fields = [
-            (
-                "jobs_retried_total",
-                FieldValue::Integer(state.jobs_retried_total),
-            ),
-            (
-                "jobs_dropped_total",
-                FieldValue::Integer(state.jobs_dropped_total),
-            ),
-        ];
-        state.send(METRICS_KIND_COUNTS, &fields, None);
-    }
-
-    async fn record_retry(&self) {
-        let mut state = self.state.lock().await;
-        state.jobs_retried_total += 1;
         let fields = [
             (
                 "jobs_retried_total",
