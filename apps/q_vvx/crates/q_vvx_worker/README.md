@@ -15,18 +15,26 @@ Example config:
 amqp_addr = "amqp://guest:guest@localhost:5672/%2f"
 assets_dir = "/opt/qrpc/pkg/share/voicevox_core"
 http_timeout_secs = 30
+speaker_list_path = "/opt/qrpc/etc/q_vvx_worker/speakers.json"
 
 # Optional overrides for assets_dir-relative paths
 # dict_path = "dict/open_jtalk_dic_utf_8-1.11"
 # onnxruntime_path = "onnxruntime/lib/libvoicevox_onnxruntime.so"
-
-[[speakers]]
-id = 3
-model = "models/vvms/0.vvm"
-
-[[speakers]]
-id = 8
-model = "models/vvms/1.vvm"
 ```
 
 Paths can be absolute or relative to `assets_dir`.
+`speaker_list_path` is resolved relative to the directory containing `config.toml`.
+Model paths in the speaker list follow the `assets_dir` rule.
+
+`speaker_list_path` is required if the default `speakers.json` does not exist.
+
+Speaker list (JSON):
+
+```json
+{
+  "speakers": [
+    { "id": 3, "model": "models/vvms/0.vvm" },
+    { "id": 8, "model": "models/vvms/1.vvm" }
+  ]
+}
+```

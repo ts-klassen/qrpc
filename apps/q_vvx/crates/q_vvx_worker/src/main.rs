@@ -32,6 +32,7 @@ use voicevox_core::{
 };
 
 const DEFAULT_CONFIG_PATH: &str = "/opt/qrpc/etc/q_vvx_worker/config.toml";
+const DEFAULT_SPEAKER_LIST_PATH: &str = "/opt/qrpc/etc/q_vvx_worker/speakers.json";
 const DEFAULT_AMQP_ADDR: &str = "amqp://guest:guest@localhost:5672/%2f";
 const DEFAULT_ASSETS_DIR: &str = "/opt/qrpc/pkg/share/voicevox_core";
 const DEFAULT_DICT_DIR: &str = "dict/open_jtalk_dic_utf_8-1.11";
@@ -891,13 +892,18 @@ struct FileConfig {
     dict_path: Option<PathBuf>,
     onnxruntime_path: Option<PathBuf>,
     http_timeout_secs: Option<u64>,
-    speakers: Option<Vec<SpeakerConfig>>,
+    speaker_list_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
 struct SpeakerConfig {
     id: u32,
     model: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpeakerListConfig {
+    speakers: Vec<SpeakerConfig>,
 }
 
 struct Config {
@@ -914,40 +920,80 @@ impl Config {
             .with_context(|| format!("failed to read config at {}", path.display()))?;
         let cfg: FileConfig = toml::from_str(&raw).context("failed to parse config")?;
 
-        let assets_dir = cfg
-            .assets_dir
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_ASSETS_DIR));
-        let dict_path = resolve_path(&assets_dir, cfg.dict_path, Some(DEFAULT_DICT_DIR))?;
+        let FileConfig {
+            amqp_addr,
+            assets_dir,
+            dict_path,
+            onnxruntime_path,
+            http_timeout_secs,
+            speaker_list_path,
+        } = cfg;
+
+        let assets_dir = assets_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_ASSETS_DIR));
+        let dict_path = resolve_path(&assets_dir, dict_path, Some(DEFAULT_DICT_DIR))?;
         let default_onnx = assets_dir
             .join("onnxruntime")
             .join("lib")
             .join(Onnxruntime::LIB_VERSIONED_FILENAME);
-        let onnxruntime_path = match cfg.onnxruntime_path {
+        let onnxruntime_path = match onnxruntime_path {
             Some(path) => resolve_path(&assets_dir, Some(path), None)?,
             None => default_onnx,
         };
-        let http_timeout_secs = cfg
-            .http_timeout_secs
-            .unwrap_or(DEFAULT_HTTP_TIMEOUT_SECS);
+        let http_timeout_secs = http_timeout_secs.unwrap_or(DEFAULT_HTTP_TIMEOUT_SECS);
+
+        let speaker_entries = match speaker_list_path {
+            Some(path_value) => {
+                let list_path =
+                    resolve_config_path(path, Some(path_value), Some(DEFAULT_SPEAKER_LIST_PATH))?;
+                load_speaker_list(&list_path)?
+            }
+            None => {
+                let default_list_path =
+                    resolve_config_path(path, None, Some(DEFAULT_SPEAKER_LIST_PATH))?;
+                if default_list_path.exists() {
+                    load_speaker_list(&default_list_path)?
+                } else {
+                    bail!(
+                        "config must include speaker_list_path, and {} must exist",
+                        DEFAULT_SPEAKER_LIST_PATH
+                    );
+                }
+            }
+        };
 
         let mut speaker_models = HashMap::new();
-        let speakers = cfg.speakers.unwrap_or_default();
-        if speakers.is_empty() {
+        let mut vvm_style_cache: HashMap<PathBuf, HashSet<u32>> = HashMap::new();
+        if speaker_entries.is_empty() {
             bail!("config must include at least one speaker entry");
         }
-        for speaker in speakers {
+        for speaker in speaker_entries {
             if speaker_models.contains_key(&speaker.id) {
                 bail!("duplicate speaker id {} in config", speaker.id);
             }
             let model_path = resolve_path(&assets_dir, Some(speaker.model), None)?;
             ensure_exists(&model_path, "voice model")?;
+            let style_ids = match vvm_style_cache.get(&model_path) {
+                Some(ids) => ids,
+                None => {
+                    let ids = collect_style_ids(&model_path)?;
+                    vvm_style_cache.insert(model_path.clone(), ids);
+                    vvm_style_cache
+                        .get(&model_path)
+                        .ok_or_else(|| anyhow!("failed to cache style ids"))?
+                }
+            };
+            if !style_ids.contains(&speaker.id) {
+                bail!(
+                    "speaker id {} not found in voice model {}",
+                    speaker.id,
+                    model_path.display()
+                );
+            }
             speaker_models.insert(speaker.id, model_path);
         }
 
         Ok(Self {
-            amqp_addr: cfg
-                .amqp_addr
-                .unwrap_or_else(|| DEFAULT_AMQP_ADDR.to_string()),
+            amqp_addr: amqp_addr.unwrap_or_else(|| DEFAULT_AMQP_ADDR.to_string()),
             dict_path,
             onnxruntime_path,
             http_timeout_secs,
@@ -1105,10 +1151,69 @@ fn resolve_path(
     }
 }
 
+fn resolve_config_path(
+    config_path: &Path,
+    value: Option<PathBuf>,
+    default_path: Option<&str>,
+) -> Result<PathBuf> {
+    if let Some(path) = value {
+        if path.is_absolute() {
+            return Ok(path);
+        }
+        if let Some(base) = config_path.parent() {
+            return Ok(base.join(path));
+        }
+        return Ok(path);
+    }
+
+    match default_path {
+        Some(default) => {
+            let default_path = Path::new(default);
+            if default_path.is_absolute() {
+                Ok(default_path.to_path_buf())
+            } else if let Some(base) = config_path.parent() {
+                Ok(base.join(default_path))
+            } else {
+                Ok(PathBuf::from(default))
+            }
+        }
+        None => bail!("path is required"),
+    }
+}
+
 fn ensure_exists(path: &Path, label: &str) -> Result<()> {
     if path.exists() {
         Ok(())
     } else {
         bail!("{label} not found at {}", path.display());
     }
+}
+
+fn load_speaker_list(path: &Path) -> Result<Vec<SpeakerConfig>> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read speaker list at {}", path.display()))?;
+    let list: SpeakerListConfig =
+        serde_json::from_str(&raw).context("failed to parse speaker list")?;
+    if list.speakers.is_empty() {
+        bail!("speaker list at {} must include at least one entry", path.display());
+    }
+    Ok(list.speakers)
+}
+
+fn collect_style_ids(model_path: &Path) -> Result<HashSet<u32>> {
+    let model_file = VoiceModelFile::open(model_path)
+        .with_context(|| format!("failed to open voice model at {}", model_path.display()))?;
+    let mut ids = HashSet::new();
+    for character in model_file.metas() {
+        for style in &character.styles {
+            ids.insert(style.id.into());
+        }
+    }
+    if ids.is_empty() {
+        bail!(
+            "no style ids found in voice model {}",
+            model_path.display()
+        );
+    }
+    Ok(ids)
 }
