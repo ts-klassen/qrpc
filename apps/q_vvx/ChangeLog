@@ -3,9 +3,6 @@ UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 	* VERSION: 0.2.0
 	Added q_vvx_worker with dynamic speaker model loading and wake queue flow.
 	Updated super_simple_tts job routing for per-speaker queues.
-	Added q_vvx_worker telegraf metrics reporting.
-	Added shared speakers.json configuration for speaker validation.
-	Removed legacy TOML speaker list entries in favor of speakers.json.
 
 
 2025-12-25  ts-klassen  <qrpc@su-shiki.com>
