@@ -1,6 +1,7 @@
 # $NetBSD$
 
 DISTNAME=       voicevox_core-0.16.3
+PKGREVISION=    1
 CATEGORIES=     audio
 MASTER_SITES=   https://github.com/VOICEVOX/voicevox_core/releases/download/${PKGVERSION_NOREV}/
 DIST_SUBDIR=    voicevox_core
