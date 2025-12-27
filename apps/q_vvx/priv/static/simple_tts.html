@@ -96,7 +96,7 @@
                     try {
                         const response = await this.$qrpc.callRpc({
                             module: 'q_vvx_core',
-                            function: 'super_simple_tts',
+                            function: 'synthesize',
                             arity: 1,
                             payload: {
                                 style_id: this.styleId,

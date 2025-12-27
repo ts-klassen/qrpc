@@ -4,7 +4,7 @@
 -include_lib("amqp_client/include/amqp_client.hrl").
 
 -export([
-        super_simple_tts/1
+        synthesize/1
     ]).
 
 -define(MAX_TEXT_BYTES, 1500).
@@ -15,7 +15,7 @@
 
 -export([load_style_map/0]).
 
-super_simple_tts(Rpc) ->
+synthesize(Rpc) ->
     StyleId = Rpc:get([payload, <<"style_id">>]),
     ensure_supported_style(StyleId),
     Text = Rpc:get([payload, <<"text">>]),
@@ -54,7 +54,7 @@ ensure_supported_style(StyleId)
                     ok;
                 false ->
                     ?QRPC_ERROR(#{
-                        id => [q_vvx, core, super_simple_tts, unsupported_style]
+                        id => [q_vvx, core, synthesize, unsupported_style]
                       , fault_source => client
                       , message => <<"Unsupported style">>
                       , message_ja => <<"未対応のスタイルです"/utf8>>
@@ -68,7 +68,7 @@ ensure_supported_style(StyleId)
             end;
         {error, Reason} ->
             ?QRPC_ERROR(#{
-                id => [q_vvx, core, super_simple_tts, style_list_unavailable]
+                id => [q_vvx, core, synthesize, style_list_unavailable]
               , fault_source => server
               , message => <<"Style list unavailable">>
               , message_ja => <<"スタイル一覧の読み込みに失敗しました"/utf8>>
@@ -83,7 +83,7 @@ ensure_supported_style(StyleId)
     end;
 ensure_supported_style(StyleId) ->
     ?QRPC_ERROR(#{
-        id => [q_vvx, core, super_simple_tts, unsupported_style]
+        id => [q_vvx, core, synthesize, unsupported_style]
       , fault_source => client
       , message => <<"Unsupported style">>
       , message_ja => <<"未対応のスタイルです"/utf8>>
@@ -192,7 +192,7 @@ ensure_supported_text(Text)
     ok;
 ensure_supported_text(Text) ->
     ?QRPC_ERROR(#{
-        id => [q_vvx, core, super_simple_tts, unsupported_text]
+        id => [q_vvx, core, synthesize, unsupported_text]
       , fault_source => client
       , message => <<"Unsupported text">>
       , message_ja => <<"未対応の文字列です"/utf8>>
@@ -206,13 +206,13 @@ ensure_supported_text(Text) ->
 
 ensure_rate_limit(Text) ->
     Queue = rate_limit_key(),
-    case qrpc_counter:add({?MODULE, super_simple_tts, Queue}, {slot, minutely}, size(Text)) of
+    case qrpc_counter:add({?MODULE, synthesize, Queue}, {slot, minutely}, size(Text)) of
         Count when Count < ?MINUTELY_LIMIT ->
             ok;
         Count ->
             Exp = qrpc_counter:parse_exp({slot, minutely}),
             ?QRPC_ERROR(#{
-                id => [q_vvx, core, super_simple_tts, minutely_limit_exceeded]
+                id => [q_vvx, core, synthesize, minutely_limit_exceeded]
               , fault_source => server
               , message => <<"minutely limit exceeded on server side">>
               , message_ja => <<"サーバー側の1分あたりの制限に達しました"/utf8>>

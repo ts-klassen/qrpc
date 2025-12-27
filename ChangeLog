@@ -11,6 +11,8 @@ UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 	Add pkgconf to qrpc-devel so pkg-config is available for openssl-sys builds.
 	Added q_vvx_worker with per-speaker queue support.
 	Generate voicevox_core models.json with jq from VVM manifests at install time.
+	Renamed q_vvx super_simple_tts RPC to synthesize.
+	Removed q_vvx_engine config and module.
 
 
 2025-12-25  ts-klassen  <qrpc@su-shiki.com>

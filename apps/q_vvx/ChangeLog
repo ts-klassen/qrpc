@@ -3,6 +3,8 @@ UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 	* VERSION: 0.2.0
 	Added q_vvx_worker with dynamic speaker model loading and wake queue flow.
 	Updated super_simple_tts job routing for per-speaker queues.
+	Renamed super_simple_tts RPC to synthesize.
+	Removed q_vvx_engine configuration and module.
 
 
 2025-12-25  ts-klassen  <qrpc@su-shiki.com>
