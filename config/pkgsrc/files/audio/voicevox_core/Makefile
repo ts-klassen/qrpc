@@ -1,7 +1,7 @@
 # $NetBSD$
 
 DISTNAME=       voicevox_core-0.16.2
-PKGREVISION=    3
+PKGREVISION=    6
 CATEGORIES=     audio
 MASTER_SITES=   https://github.com/VOICEVOX/voicevox_core/releases/download/${PKGVERSION_NOREV}/
 DIST_SUBDIR=    voicevox_core
@@ -31,7 +31,7 @@ VV_OUTPUT=              ${WRKSRC}/voicevox_core
 VV_OS=                  linux
 VV_CPU_ARCH=            x64
 VV_DEVICE=              cuda
-VV_MODELS_VERSION=      0.16.0
+VV_MODELS_VERSION=      0.16.2
 VV_ONNXRUNTIME_VERSION= voicevox_onnxruntime-1.17.3
 VV_ADDITIONAL_LIBS_VER= 0.2.0
 VV_DICT_DISTFILE=       open_jtalk_dic_utf_8-1.11.tar.gz
@@ -60,7 +60,8 @@ VV_MODELS_VVMS= \
 	19.vvm \
 	20.vvm \
 	21.vvm \
-	s0.vvm
+	s0.vvm \
+	n0.vvm
 VV_MODELS_DOCS= \
 	README.txt \
 	TERMS.txt

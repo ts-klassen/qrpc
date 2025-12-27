@@ -1,6 +1,6 @@
 @comment $NetBSD$
-etc/voicevox_core/models.json
 etc/voicevox_core/main.json
+etc/voicevox_core/models.json
 share/voicevox_core/additional_libraries/libcublas.so.12
 share/voicevox_core/additional_libraries/libcublasLt.so.12
 share/voicevox_core/additional_libraries/libcudart.so.12
@@ -43,6 +43,7 @@ share/voicevox_core/models/vvms/6.vvm
 share/voicevox_core/models/vvms/7.vvm
 share/voicevox_core/models/vvms/8.vvm
 share/voicevox_core/models/vvms/9.vvm
+share/voicevox_core/models/vvms/n0.vvm
 share/voicevox_core/models/vvms/s0.vvm
 share/voicevox_core/onnxruntime/GIT_COMMIT_ID
 share/voicevox_core/onnxruntime/TERMS.txt

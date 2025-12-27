@@ -1,5 +1,5 @@
 def normalize_styles($styles):
-  ($styles | sort_by(.id) | map({
+  ($styles | map({
       name: .name,
       id: .id,
       type: ((.type // "talk") | if . == "singing_teacher" then "sing" else . end)
@@ -15,18 +15,22 @@ def add_styles($entry; $styles):
   );
 
 def metas_in_order:
-  to_entries | map(.value.metas // []) | add // [];
+  to_entries
+  | map(. as $entry | ($entry.value.metas // []) | map(. + {vvm_key: $entry.key}))
+  | add // [];
 
 (metas_in_order) as $metas
 | reduce $metas[] as $meta ({speakers: {}, order: []};
     ($meta.speaker_uuid // "") as $uuid
+    | ($meta.vvm_key // "") as $vvm_key
+    | ($vvm_key | startswith("n")) as $is_nemo
     | if $uuid == "" then .
       else
         if .speakers[$uuid] == null then
           .order += [$uuid]
           | .speakers[$uuid] = {
               prefix: "VOICEVOX:",
-              isNemo: false,
+              isNemo: $is_nemo,
               name: $meta.name,
               styles: [],
               terms: "",
@@ -34,6 +38,7 @@ def metas_in_order:
             }
         else . end
         | .speakers[$uuid] = add_styles(.speakers[$uuid]; normalize_styles($meta.styles // []))
+        | if $is_nemo then .speakers[$uuid].isNemo = true else . end
       end
   )
 | reduce (($name_overrides[0] // {}) | keys[]) as $uuid (. ;
