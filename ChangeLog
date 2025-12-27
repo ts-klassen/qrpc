@@ -7,7 +7,7 @@ UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 		* q_vvx: 0.2.0
 	* PACKAGE VERSIONS:
 		* qrpc-devel: 0.2.0
-		* qrpc-prod: 0.1.0
+		* qrpc-prod: 0.2.0
 	Add pkgconf to qrpc-devel so pkg-config is available for openssl-sys builds.
 	Add zip, unzip, jq, and nawk to qrpc-devel dependencies.
 	Fix qrpc-devel 0.1.0 package versions list.
@@ -17,6 +17,7 @@ UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 	Removed q_vvx_engine config and module.
 	Generate voicevox main.json from models.json at install time.
 	Download voicevox_vvm models via pkgsrc distfiles.
+	Update qrpc-prod voicevox_core to 0.16.3.
 
 
 2025-12-25  ts-klassen  <qrpc@su-shiki.com>

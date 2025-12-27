@@ -1,3 +1,17 @@
+UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
+
+	* VERSION: 0.2.0
+	* PACKAGE VERSIONS:
+		* cronolog: 1.6.2
+		* duplicity: 3.0.5.1
+		* openssl: 3.6.0
+		* ca-certificates: 20250419
+		* rabbitmq: 3.13.7
+		* voicevox_core: 0.16.3
+		* pkg_install: 20250417
+	Update voicevox_core to 0.16.3.
+
+
 2025-12-25  ts-klassen  <qrpc@su-shiki.com>
 
 	* VERSION: 0.1.0
