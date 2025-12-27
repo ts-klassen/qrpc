@@ -1,4 +1,4 @@
-UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
+2025-12-28  ts-klassen  <qrpc@su-shiki.com>
 
 	* VERSION: 0.2.0
 	Added q_vvx_bench for scenario-based synthesize benchmarking.
