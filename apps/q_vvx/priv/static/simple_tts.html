@@ -2,22 +2,36 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>シンプル音声合成</title>
     <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
     <script src="/qrpc/qrpc/static/qrpc_vue_plugin.js"></script>
     <style>
         body {
             font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            margin: 2rem;
+            margin: 1.5rem;
             color: #1f2328;
+        }
+        #app {
+            max-width: 1100px;
+            width: 100%;
+            margin: 0 auto;
         }
         textarea {
             width: 100%;
             min-height: 6rem;
             font-size: 1rem;
             padding: 0.75rem;
+            margin-top: 0.5rem;
         }
-        input[type="number"] {
+        label {
+            display: block;
+            margin-top: 0.9rem;
+        }
+        label:first-of-type {
+            margin-top: 0;
+        }
+        select {
             width: 100%;
             font-size: 1rem;
             padding: 0.5rem 0.75rem;
@@ -32,15 +46,47 @@
             margin-top: 1rem;
             min-height: 1.5rem;
         }
+        .terms {
+            margin-top: 0.75rem;
+        }
+        @media (max-width: 640px) {
+            body {
+                margin: 1rem;
+            }
+            #app {
+                max-width: 100%;
+            }
+            textarea {
+                min-height: 8rem;
+            }
+            button {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
     <div id="app">
         <h1>シンプル音声合成</h1>
-        <p>テキストとスタイル ID を指定して音声合成します。</p>
+        <p>
+            非公式です。本サイトは、<a href="https://voicevox.hiroshiba.jp/">VOICEVOX</a>（ボイスボックス）と<a href="https://voicevox.hiroshiba.jp/nemo">VOICEVOX Nemo</a>（ボイスボックス ネモ）を使って音声を合成しております。利用規約等もこちらでご確認ください。
+        </p>
+        <p>テキストとスタイルを選択して音声合成します。</p>
         <label>
-            スタイル ID
-            <input v-model.number="styleId" type="number" placeholder="例: 3">
+            話者
+            <select v-model="selectedVoiceId">
+                <option v-for="voice in voices" :key="voice.id" :value="voice.id">
+                    {{ voice.name }}
+                </option>
+            </select>
+        </label>
+        <label>
+            スタイル
+            <select v-model.number="styleId">
+                <option v-for="style in availableStyles" :key="style.id" :value="style.id">
+                    {{ style.name }} (ID: {{ style.id }})
+                </option>
+            </select>
         </label>
         <label>
             読み上げるテキスト
@@ -54,17 +100,24 @@
             <span v-else-if="loading">{{ statusMessage || '処理中です…' }}</span>
             <span v-else-if="audioUrl">準備完了！下のプレイヤーで再生してください。</span>
         </div>
-        <audio v-if="audioUrl" :src="audioUrl" controls></audio>
+        <div class="terms" v-if="selectedVoiceTerms">
+            <div>{{ selectedVoiceLabel }}</div>
+            <div v-html="selectedVoiceTerms"></div>
+        </div>
+        <audio v-if="audioUrl" ref="audio" :src="audioUrl" controls></audio>
     </div>
     <script>
         const { createApp } = Vue;
         const COMPLETE_MESSAGE = 'q_vvx_worker:upload_complete';
+        const VOICEVOX_MAIN_JSON = '/qrpc/q_vvx/static/voicevox_core/main.json';
 
         createApp({
             data() {
                 return {
-                    text: 'こんにちは、世界！',
-                    styleId: 3,
+                    text: '',
+                    styleId: null,
+                    selectedVoiceId: null,
+                    voices: [],
                     loading: false,
                     audioUrl: null,
                     error: null,
@@ -72,7 +125,64 @@
                     activeEventId: null
                 };
             },
+            computed: {
+                availableStyles() {
+                    const selected = this.voices.find((voice) => voice.id === this.selectedVoiceId);
+                    return selected ? selected.styles.filter((style) => style.type === 'talk') : [];
+                },
+                selectedVoiceTerms() {
+                    const selected = this.voices.find((voice) => voice.id === this.selectedVoiceId);
+                    return selected?.terms || '';
+                },
+                selectedVoiceLabel() {
+                    const selected = this.voices.find((voice) => voice.id === this.selectedVoiceId);
+                    if (!selected) {
+                        return '';
+                    }
+                    return `${selected.prefix || ''}${selected.name || ''}`;
+                }
+            },
+            watch: {
+                selectedVoiceId() {
+                    const firstStyle = this.availableStyles[0];
+                    if (firstStyle) {
+                        this.styleId = firstStyle.id;
+                    }
+                },
+                audioUrl() {
+                    if (!this.audioUrl) {
+                        return;
+                    }
+                    this.$nextTick(() => {
+                        const audio = this.$refs.audio;
+                        if (audio && audio.play) {
+                            audio.play().catch(() => {});
+                        }
+                    });
+                }
+            },
             methods: {
+                async loadVoices() {
+                    const response = await fetch(VOICEVOX_MAIN_JSON, { cache: 'no-cache' });
+                    if (!response.ok) {
+                        throw new Error('スタイル一覧の取得に失敗しました。');
+                    }
+                    const data = await response.json();
+                    this.voices = Object.entries(data).map(([id, entry]) => ({
+                        id,
+                        prefix: entry.prefix || '',
+                        name: entry.name,
+                        styles: entry.styles || [],
+                        terms: entry.terms || ''
+                    }));
+                    if (this.voices.length > 0) {
+                        this.selectedVoiceId = this.voices[0].id;
+                        const firstStyle = this.voices[0].styles.find((style) => style.type === 'talk');
+                        if (firstStyle) {
+                            this.styleId = firstStyle.id;
+                        }
+                    }
+                },
                 formatError(error) {
                     const languageSetting = this.$qrpc?.settings?.get()?.language || 'en';
                     return (error?.messages && error.messages[languageSetting])
@@ -83,6 +193,10 @@
                 async synthesize() {
                     if (!this.$qrpc) {
                         this.error = 'QRPC プラグインが利用できません。';
+                        return;
+                    }
+                    if (!this.styleId) {
+                        this.error = 'スタイルを選択してください。';
                         return;
                     }
                     if (!this.text.trim()) {
@@ -151,6 +265,13 @@
                         }
                     }
                     throw new Error('音声生成がタイムアウトしました。');
+                }
+            },
+            async mounted() {
+                try {
+                    await this.loadVoices();
+                } catch (error) {
+                    this.error = `エラー: ${this.formatError(error)}`;
                 }
             }
         }).use(QrpcVuePlugin).mount('#app');
