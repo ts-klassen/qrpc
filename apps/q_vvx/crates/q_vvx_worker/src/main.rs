@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     fs,
+    io,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -519,6 +520,7 @@ impl SynthResources {
         let startup_timer = Instant::now();
         ensure_exists(&cfg.onnxruntime_path, "onnxruntime library")?;
         ensure_exists(&cfg.dict_path, "open_jtalk dictionary")?;
+        configure_library_paths(&cfg.assets_dir, &cfg.onnxruntime_path);
 
         let dict_path_str = cfg
             .dict_path
@@ -895,6 +897,7 @@ struct FileConfig {
 
 struct Config {
     amqp_addr: String,
+    assets_dir: PathBuf,
     dict_path: PathBuf,
     onnxruntime_path: PathBuf,
     http_timeout_secs: u64,
@@ -903,9 +906,20 @@ struct Config {
 
 impl Config {
     fn load(path: &Path) -> Result<Self> {
-        let raw = fs::read_to_string(path)
-            .with_context(|| format!("failed to read config at {}", path.display()))?;
-        let cfg: FileConfig = toml::from_str(&raw).context("failed to parse config")?;
+        let cfg = match fs::read_to_string(path) {
+            Ok(raw) => toml::from_str(&raw).context("failed to parse config")?,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => FileConfig {
+                amqp_addr: None,
+                assets_dir: None,
+                dict_path: None,
+                onnxruntime_path: None,
+                http_timeout_secs: None,
+            },
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("failed to read config at {}", path.display()))
+            }
+        };
 
         let FileConfig {
             amqp_addr,
@@ -931,6 +945,7 @@ impl Config {
 
         Ok(Self {
             amqp_addr: amqp_addr.unwrap_or_else(|| DEFAULT_AMQP_ADDR.to_string()),
+            assets_dir,
             dict_path,
             onnxruntime_path,
             http_timeout_secs,
@@ -1093,6 +1108,37 @@ fn ensure_exists(path: &Path, label: &str) -> Result<()> {
         Ok(())
     } else {
         bail!("{label} not found at {}", path.display());
+    }
+}
+
+fn configure_library_paths(assets_dir: &Path, onnxruntime_path: &Path) {
+    let mut paths = Vec::new();
+    if let Some(onnx_dir) = onnxruntime_path.parent() {
+        paths.push(onnx_dir.to_path_buf());
+    }
+    let additional = assets_dir.join("additional_libraries");
+    if additional.exists() {
+        paths.push(additional);
+    }
+    prepend_env_paths("LD_LIBRARY_PATH", &paths);
+}
+
+fn prepend_env_paths(name: &str, paths: &[PathBuf]) {
+    let mut existing: Vec<PathBuf> = env::var_os(name)
+        .map(env::split_paths)
+        .map(|paths| paths.collect())
+        .unwrap_or_default();
+
+    let mut new_paths = Vec::new();
+    for path in paths {
+        if !existing.iter().any(|existing| existing == path) {
+            new_paths.push(path.clone());
+        }
+    }
+    new_paths.append(&mut existing);
+
+    if let Ok(joined) = env::join_paths(new_paths.iter()) {
+        env::set_var(name, joined);
     }
 }
 

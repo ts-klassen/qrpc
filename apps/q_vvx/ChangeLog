@@ -1,3 +1,10 @@
+UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
+
+	* VERSION: 0.2.1
+	q_vvx_worker now prepends additional_libraries and onnxruntime lib paths for GPU loading.
+	q_vvx_worker config is optional and defaults when missing.
+
+
 2025-12-28  ts-klassen  <qrpc@su-shiki.com>
 
 	* VERSION: 0.2.0
