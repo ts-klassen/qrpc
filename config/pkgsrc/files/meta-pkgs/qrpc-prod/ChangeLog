@@ -1,9 +1,13 @@
 UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 
-	* VERSION: 0.2.1
+	* VERSION: 0.3.0
 	* PACKAGE VERSIONS:
 		* nawk: 20250726
 		* cronolog: 1.6.2
+		* lmdb: 0.9.33
+		* mit-krb5: 1.21.3nb2
+		* py313-gssapi: 1.10.1
+		* py313-paramiko: 4.0.0
 		* duplicity: 3.0.5.1
 		* openssl: 3.6.0
 		* ca-certificates: 20250419
@@ -11,6 +15,7 @@ UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 		* voicevox_core: 0.16.3nb1
 		* pkg_install: 20250417
 	Bump voicevox_core to nb1 for qrpc-prod.
+	Add lmdb, mit-krb5, py313-gssapi, and py313-paramiko to qrpc-prod.
 
 
 2025-12-28  ts-klassen  <qrpc@su-shiki.com>
