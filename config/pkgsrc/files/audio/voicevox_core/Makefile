@@ -1,7 +1,7 @@
 # $NetBSD$
 
 DISTNAME=       voicevox_core-0.16.2
-PKGREVISION=    2
+PKGREVISION=    3
 CATEGORIES=     audio
 MASTER_SITES=   https://github.com/VOICEVOX/voicevox_core/releases/download/${PKGVERSION_NOREV}/
 DIST_SUBDIR=    voicevox_core
@@ -37,16 +37,49 @@ VV_ADDITIONAL_LIBS_VER= 0.2.0
 VV_DICT_DISTFILE=       open_jtalk_dic_utf_8-1.11.tar.gz
 VV_DICT_DIR=            open_jtalk_dic_utf_8-1.11
 VV_DICT_SRC=            ${WRKSRC}/${VV_DICT_DIR}
+VV_MODELS_VVMS= \
+	0.vvm \
+	1.vvm \
+	2.vvm \
+	3.vvm \
+	4.vvm \
+	5.vvm \
+	6.vvm \
+	7.vvm \
+	8.vvm \
+	9.vvm \
+	10.vvm \
+	11.vvm \
+	12.vvm \
+	13.vvm \
+	14.vvm \
+	15.vvm \
+	16.vvm \
+	17.vvm \
+	18.vvm \
+	19.vvm \
+	20.vvm \
+	21.vvm \
+	s0.vvm
+VV_MODELS_DOCS= \
+	README.txt \
+	TERMS.txt
+VV_MODELS_FILES=        ${VV_MODELS_VVMS} ${VV_MODELS_DOCS}
+VV_MODELS_SITES=        https://github.com/VOICEVOX/voicevox_vvm/releases/download/${VV_MODELS_VERSION}/
+VV_MODELS_DISTDIR=      ${DISTDIR}/${DIST_SUBDIR}
 VV_MAIN_FILTER=         ${FILESDIR}/main_filter.jq
 VV_MAIN_NAME_OVERRIDES= ${FILESDIR}/main_name_overrides.json
 VV_MAIN_TERMS_OVERRIDES=${FILESDIR}/main_terms_overrides.json
 VV_MAIN_ORDER_OVERRIDES=${FILESDIR}/main_order_overrides.json
 
-DISTFILES=              download-linux-x64 ${VV_DICT_DISTFILE}
+DISTFILES=              download-linux-x64 ${VV_DICT_DISTFILE} ${VV_MODELS_FILES}
 SITES.${VV_DICT_DISTFILE}= \
 	https://packages.qrpc.jp/
 EXTRACT_ONLY=           ${VV_DICT_DISTFILE}
 DOWNLOAD_BIN=   ${DISTDIR}/${DIST_SUBDIR}/download-linux-x64
+.for f in ${VV_MODELS_FILES}
+SITES.${f}= ${VV_MODELS_SITES}
+.endfor
 
 BUILD_DEPENDS+= ca-certificates-[0-9]*:../../security/ca-certificates
 BUILD_DEPENDS+= jq:../../devel/jq
@@ -61,6 +94,7 @@ do-build:
 			--tries 0 \
 			--exclude c-api \
 			--exclude dict \
+			--exclude models \
 			--models-version ${VV_MODELS_VERSION} \
 			--additional-libraries-version ${VV_ADDITIONAL_LIBS_VER} \
 			--onnxruntime-version ${VV_ONNXRUNTIME_VERSION} \
@@ -74,6 +108,17 @@ do-build:
 	${RUN} test -d ${VV_DICT_SRC} || { ${ECHO} "Open JTalk dictionary missing: ${VV_DICT_SRC}"; ${FALSE}; }
 	${RUN} ${MKDIR} ${VV_OUTPUT}/dict/${VV_DICT_DIR}
 	cd ${VV_DICT_SRC} && ${PAX} -rw . ${VV_OUTPUT}/dict/${VV_DICT_DIR}
+	${RUN} ${INSTALL_DATA_DIR} ${VV_OUTPUT}/models/vvms
+	${RUN} for vvm in ${VV_MODELS_VVMS}; do \
+		src=${VV_MODELS_DISTDIR}/$$vvm; \
+		[ -f $$src ] || { ${ECHO} "Missing VVM distfile: $$src"; ${FALSE}; }; \
+		${INSTALL_DATA} $$src ${VV_OUTPUT}/models/vvms/; \
+	done
+	${RUN} for doc in ${VV_MODELS_DOCS}; do \
+		src=${VV_MODELS_DISTDIR}/$$doc; \
+		[ -f $$src ] || { ${ECHO} "Missing VVM distfile: $$src"; ${FALSE}; }; \
+		${INSTALL_DATA} $$src ${VV_OUTPUT}/models/; \
+	done
 
 do-install:
 	${RUN} ${INSTALL_DATA_DIR} ${DESTDIR}${PREFIX}/share/voicevox_core
