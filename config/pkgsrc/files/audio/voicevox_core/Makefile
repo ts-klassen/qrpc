@@ -1,7 +1,7 @@
 # $NetBSD$
 
 DISTNAME=       voicevox_core-0.16.2
-PKGREVISION=    1
+PKGREVISION=    2
 CATEGORIES=     audio
 MASTER_SITES=   https://github.com/VOICEVOX/voicevox_core/releases/download/${PKGVERSION_NOREV}/
 DIST_SUBDIR=    voicevox_core
@@ -37,6 +37,10 @@ VV_ADDITIONAL_LIBS_VER= 0.2.0
 VV_DICT_DISTFILE=       open_jtalk_dic_utf_8-1.11.tar.gz
 VV_DICT_DIR=            open_jtalk_dic_utf_8-1.11
 VV_DICT_SRC=            ${WRKSRC}/${VV_DICT_DIR}
+VV_MAIN_FILTER=         ${FILESDIR}/main_filter.jq
+VV_MAIN_NAME_OVERRIDES= ${FILESDIR}/main_name_overrides.json
+VV_MAIN_TERMS_OVERRIDES=${FILESDIR}/main_terms_overrides.json
+VV_MAIN_ORDER_OVERRIDES=${FILESDIR}/main_order_overrides.json
 
 DISTFILES=              download-linux-x64 ${VV_DICT_DISTFILE}
 SITES.${VV_DICT_DISTFILE}= \
@@ -101,6 +105,18 @@ do-install:
 		if [ $$found -eq 0 ]; then ${ECHO} "No vvm models found in ${DESTDIR}${PREFIX}/share/voicevox_core/models/vvms" 1>&2; exit 1; fi; \
 		${PREFIX}/bin/jq -s "add" $$tmpdir/*.entry.json > $$out; \
 		${RM} -rf $$tmpdir; \
+	'
+	${RUN} ${SH} -c '\
+		set -e; \
+		in=${DESTDIR}${PREFIX}/etc/voicevox_core/models.json; \
+		out=${DESTDIR}${PREFIX}/etc/voicevox_core/main.json; \
+		filter=${VV_MAIN_FILTER}; \
+		name_overrides=${VV_MAIN_NAME_OVERRIDES}; \
+		terms_overrides=${VV_MAIN_TERMS_OVERRIDES}; \
+		order_overrides=${VV_MAIN_ORDER_OVERRIDES}; \
+		${PREFIX}/bin/jq -c -f $$filter --slurpfile name_overrides $$name_overrides \
+			--slurpfile terms_overrides $$terms_overrides \
+			--slurpfile order_overrides $$order_overrides $$in > $$out; \
 	'
 
 .include "../../mk/bsd.pkg.mk"

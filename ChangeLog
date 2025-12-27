@@ -13,6 +13,7 @@ UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 	Generate voicevox_core models.json with jq from VVM manifests at install time.
 	Renamed q_vvx super_simple_tts RPC to synthesize.
 	Removed q_vvx_engine config and module.
+	Generate voicevox main.json from models.json at install time.
 
 
 2025-12-25  ts-klassen  <qrpc@su-shiki.com>
