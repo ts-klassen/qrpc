@@ -73,6 +73,7 @@ VV_MAIN_NAME_OVERRIDES= ${FILESDIR}/main_name_overrides.json
 VV_MAIN_TERMS_OVERRIDES=${FILESDIR}/main_terms_overrides.json
 VV_MAIN_ORDER_OVERRIDES=${FILESDIR}/main_order_overrides.json
 
+# FIXME: Stop using downloader. The sum of downloader itself can change at any time.
 DISTFILES=              download-linux-x64 ${VV_DICT_DISTFILE} ${VV_MODELS_FILES}
 SITES.${VV_DICT_DISTFILE}= \
 	https://packages.qrpc.jp/
