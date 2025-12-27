@@ -11,7 +11,6 @@ DEPENDS+=       pkgconf>=2.4.3:../../devel/pkgconf
 DEPENDS+=       zip>=3.0:../../archivers/zip
 DEPENDS+=       unzip>=6.0:../../archivers/unzip
 DEPENDS+=       jq>=1.8.1:../../devel/jq
-DEPENDS+=       nawk>=20250726:../../lang/nawk
 DEPENDS+=       qrpc-prod>=0.1.0:../../meta-pkgs/qrpc-prod
 DEPENDS+=       pkg_tarup>=1.9.1:../../pkgtools/pkg_tarup
 DEPENDS+=       ansible>=12.1.0:../../sysutils/ansible

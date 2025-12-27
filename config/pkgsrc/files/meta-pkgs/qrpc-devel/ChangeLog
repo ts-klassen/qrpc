@@ -8,13 +8,10 @@ UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 		* zip: 3.0
 		* unzip: 6.0
 		* jq: 1.8.1
-		* nawk: 20250726
 		* qrpc-prod: 0.1.0
 		* pkg_tarup: 1.9.1
 		* ansible: 12.1.0
 		* mit-krb5: 1.21.3
-	Add pkgconf so pkg-config is available for openssl-sys builds.
-	Add zip, unzip, jq, and nawk to qrpc-devel dependencies.
 
 
 2025-12-25  ts-klassen  <qrpc@su-shiki.com>

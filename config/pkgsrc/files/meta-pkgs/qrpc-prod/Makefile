@@ -5,6 +5,7 @@ MASTER_SITES=   # empty
 MAINTAINER=     qrpc@su-shiki.com
 COMMENT=        All you need to run qrpc as prod
 
+DEPENDS+=       nawk>=20250726:../../lang/nawk
 DEPENDS+=       cronolog>=1.6.2:../../www/cronolog
 DEPENDS+=       duplicity>=3.0.5.1:../../sysutils/duplicity
 DEPENDS+=       openssl>=3.6.0:../../security/openssl
