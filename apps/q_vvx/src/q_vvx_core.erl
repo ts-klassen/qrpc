@@ -249,38 +249,20 @@ send_job(StyleId, Payload) ->
             #'basic.publish'{exchange = worker_exchange(), routing_key = RoutingKey},
             Msg
         ),
-        declare_exchange(Chan, wake_exchange()),
-        WakeBody = iolist_to_binary(json:encode(#{<<"style_id">> => StyleId})),
-        WakeMsg = #amqp_msg{
-            props = #'P_basic'{content_type = <<"application/json">>, delivery_mode = 1},
-            payload = WakeBody
-        },
-        ok = amqp_channel:cast(
-            Chan,
-            #'basic.publish'{exchange = wake_exchange(), routing_key = wake_routing_key()},
-            WakeMsg
-        ),
         ensure_closed(catch amqp_channel:close(Chan))
     after
         process_flag(trap_exit, PrevTrap),
         ensure_closed(catch amqp_connection:close(Conn))
     end.
 
-queue_name(StyleId) ->
-    StyleBin = klsn_binstr:from_any(StyleId),
-    <<"q_vvx_tts_", StyleBin/binary>>.
+queue_name(_StyleId) ->
+    <<"q_vvx_tts">>.
 
-routing_key(StyleId) ->
-    klsn_binstr:from_any(StyleId).
+routing_key(_StyleId) ->
+    <<"job">>.
 
 worker_exchange() ->
     <<"q_vvx_tts_exchange">>.
-
-wake_exchange() ->
-    <<"q_vvx_tts_wake_exchange">>.
-
-wake_routing_key() ->
-    <<"wake">>.
 
 rate_limit_key() ->
     <<"q_vvx_tts">>.

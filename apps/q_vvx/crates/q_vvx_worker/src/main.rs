@@ -14,13 +14,12 @@ use futures_util::StreamExt;
 use lapin::{
     message::Delivery,
     options::{
-        BasicAckOptions, BasicConsumeOptions, BasicGetOptions, BasicPublishOptions,
-        BasicQosOptions, ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions,
+        BasicAckOptions, BasicConsumeOptions, BasicPublishOptions, BasicQosOptions,
+        ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions,
     },
     types::FieldTable,
     BasicProperties, Channel, Connection, ConnectionProperties, ExchangeKind,
 };
-use rand::seq::SliceRandom;
 use reqwest::{header::CONTENT_TYPE, Client, Url};
 use serde::Deserialize;
 use serde_json::json;
@@ -41,10 +40,8 @@ const DEFAULT_DICT_DIR: &str = "dict/open_jtalk_dic_utf_8-1.11";
 const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 30;
 const EVENT_EXCHANGE: &str = "qrpc_event_exchange";
 const JOB_EXCHANGE: &str = "q_vvx_tts_exchange";
-const WAKE_EXCHANGE: &str = "q_vvx_tts_wake_exchange";
-const WAKE_QUEUE: &str = "q_vvx_tts_wake";
-const WAKE_ROUTING_KEY: &str = "wake";
-const JOB_QUEUE_PREFIX: &str = "q_vvx_tts_";
+const JOB_QUEUE: &str = "q_vvx_tts";
+const JOB_ROUTING_KEY: &str = "job";
 const MESSAGE_ON_COMPLETE: &str = "q_vvx_worker:upload_complete";
 const MESSAGE_ON_FAILED: &str = "q_vvx_worker:upload_failed";
 const MESSAGE_ON_SYNTH_START: &str = "q_vvx_worker:synth_start";
@@ -96,11 +93,9 @@ struct Worker {
     synth: SynthResources,
     http: Client,
     _conn: Connection,
-    job_channel: Channel,
-    wake_consumer: lapin::Consumer,
+    job_consumer: lapin::Consumer,
     event_publisher: EventPublisher,
     metrics: Metrics,
-    style_ids: Vec<u32>,
     current_model: Option<LoadedModel>,
 }
 
@@ -145,77 +140,37 @@ impl Worker {
             .context("failed to declare job exchange")?;
 
         job_channel
-            .exchange_declare(
-                WAKE_EXCHANGE,
-                ExchangeKind::Direct,
-                ExchangeDeclareOptions {
+            .queue_declare(
+                JOB_QUEUE,
+                QueueDeclareOptions {
                     durable: true,
                     ..Default::default()
                 },
                 FieldTable::default(),
             )
             .await
-            .context("failed to declare wake exchange")?;
-
-        for style_id in cfg.style_models.keys() {
-            let queue_name = job_queue_name(*style_id);
-            job_channel
-                .queue_declare(
-                    &queue_name,
-                    QueueDeclareOptions {
-                        durable: true,
-                        ..Default::default()
-                    },
-                    FieldTable::default(),
-                )
-                .await
-                .with_context(|| format!("failed to declare job queue {queue_name}"))?;
-
-            job_channel
-                .queue_bind(
-                    &queue_name,
-                    JOB_EXCHANGE,
-                    &style_id.to_string(),
-                    QueueBindOptions::default(),
-                    FieldTable::default(),
-                )
-                .await
-                .with_context(|| format!("failed to bind job queue {queue_name}"))?;
-        }
-
-        job_channel
-            .queue_declare(
-                WAKE_QUEUE,
-                QueueDeclareOptions {
-                    auto_delete: true,
-                    durable: false,
-                    ..Default::default()
-                },
-                FieldTable::default(),
-            )
-            .await
-            .context("failed to declare wake queue")?;
+            .context("failed to declare job queue")?;
 
         job_channel
             .queue_bind(
-                WAKE_QUEUE,
-                WAKE_EXCHANGE,
-                WAKE_ROUTING_KEY,
+                JOB_QUEUE,
+                JOB_EXCHANGE,
+                JOB_ROUTING_KEY,
                 QueueBindOptions::default(),
                 FieldTable::default(),
             )
             .await
-            .context("failed to bind wake queue")?;
+            .context("failed to bind job queue")?;
 
-        let wake_consumer = job_channel
+        let job_consumer = job_channel
             .basic_consume(
-                WAKE_QUEUE,
-                "q_vvx_worker_wake",
+                JOB_QUEUE,
+                "q_vvx_worker_job",
                 BasicConsumeOptions::default(),
                 FieldTable::default(),
             )
             .await
-            .context("failed to start wake consumer")?;
+            .context("failed to start job consumer")?;
 
         event_channel
             .exchange_declare(
@@ -230,124 +185,36 @@ impl Worker {
             .await
             .context("failed to declare qrpc_event exchange")?;
 
-        let style_ids = cfg.sorted_style_ids();
-
         Ok(Self {
             cfg,
             synth,
             http,
             _conn: conn,
-            job_channel,
-            wake_consumer,
+            job_consumer,
             event_publisher: EventPublisher::new(event_channel, worker_id),
             metrics,
-            style_ids,
             current_model: None,
         })
     }
 
     async fn run(mut self) -> Result<()> {
         info!(
-            styles = self.style_ids.len(),
+            styles = self.cfg.style_models.len(),
             "worker ready for jobs"
         );
 
-        loop {
-            if let Some(style_id) = self.current_model.as_ref().map(|model| model.style_id) {
-                if let Some(delivery) = self.try_get_job(style_id).await? {
-                    self.process_delivery(delivery).await?;
-                    continue;
-                }
-            }
-
-            match self.select_style_with_messages().await? {
-                Some(style_id) => {
-                    if let Some(delivery) = self.try_get_job(style_id).await? {
-                        self.process_delivery(delivery).await?;
-                    }
-                }
-                None => {
-                    self.wait_for_wake().await?;
-                }
-            }
-        }
-    }
-
-    async fn try_get_job(&self, style_id: u32) -> Result<Option<Delivery>> {
-        let queue_name = job_queue_name(style_id);
-        let message = self
-            .job_channel
-            .basic_get(
-                &queue_name,
-                BasicGetOptions {
-                    no_ack: false,
-                    ..Default::default()
-                },
-            )
-            .await
-            .with_context(|| format!("failed to read from {queue_name}"))?;
-
-        Ok(message.map(|msg| msg.delivery))
-    }
-
-    async fn select_style_with_messages(&self) -> Result<Option<u32>> {
-        let mut max_count = 0u32;
-        let mut candidates = Vec::new();
-
-        for style_id in &self.style_ids {
-            let queue_name = job_queue_name(*style_id);
-            let queue = self
-                .job_channel
-                .queue_declare(
-                    &queue_name,
-                    QueueDeclareOptions {
-                        passive: true,
-                        ..Default::default()
-                    },
-                    FieldTable::default(),
-                )
-                .await
-                .with_context(|| format!("failed to inspect queue {queue_name}"))?;
-            let count = queue.message_count();
-
-            if count == 0 {
-                continue;
-            }
-
-            if count > max_count {
-                max_count = count;
-                candidates.clear();
-                candidates.push(*style_id);
-            } else if count == max_count {
-                candidates.push(*style_id);
-            }
-        }
-
-        if candidates.is_empty() {
-            return Ok(None);
-        }
-
-        let mut rng = rand::thread_rng();
-        Ok(candidates.choose(&mut rng).copied())
-    }
-
-    async fn wait_for_wake(&mut self) -> Result<()> {
-        info!("waiting for wake message");
-        while let Some(delivery_result) = self.wake_consumer.next().await {
+        while let Some(delivery_result) = self.job_consumer.next().await {
             match delivery_result {
                 Ok(delivery) => {
-                    if let Err(err) = delivery.ack(BasicAckOptions::default()).await {
-                        return Err(anyhow!("failed to ack wake message: {err}"));
-                    }
-                    return Ok(());
+                    self.process_delivery(delivery).await?;
                 }
                 Err(err) => {
-                    return Err(anyhow!("wake consumer error: {err}"));
+                    return Err(anyhow!("job consumer error: {err}"));
                 }
             }
         }
 
-        Err(anyhow!("wake consumer closed"))
+        Err(anyhow!("job consumer closed"))
     }
 
     async fn process_delivery(&mut self, delivery: Delivery) -> Result<()> {
@@ -398,25 +265,18 @@ impl Worker {
         };
         let model_tag = model_tag_value(&model_path);
 
-        if self
-            .current_model
-            .as_ref()
-            .map(|model| model.style_id)
-            != Some(prepared.style_id)
-        {
-            if let Err(err) = self.load_model(prepared.style_id, &model_path) {
-                warn!(
-                    ?err,
-                    style_id = prepared.style_id,
-                    model_path = %model_path.display(),
-                    "failed to load voice model"
-                );
-                let message = format_failure_message(&format!("model load failed: {err}"));
-                self.metrics.record_drop().await;
-                self.ack_delivery(&delivery).await?;
-                self.spawn_event(namespace, event_id, message);
-                return Ok(());
-            }
+        if let Err(err) = self.load_model(prepared.style_id, &model_path) {
+            warn!(
+                ?err,
+                style_id = prepared.style_id,
+                model_path = %model_path.display(),
+                "failed to load voice model"
+            );
+            let message = format_failure_message(&format!("model load failed: {err}"));
+            self.metrics.record_drop().await;
+            self.ack_delivery(&delivery).await?;
+            self.spawn_event(namespace, event_id, message);
+            return Ok(());
         }
 
         self.publish_event(
@@ -432,10 +292,12 @@ impl Worker {
                 let message = format_failure_message(&format!("synthesis failed: {err}"));
                 self.metrics.record_drop().await;
                 self.ack_delivery(&delivery).await?;
+                self.unload_model();
                 self.spawn_event(namespace, event_id, message);
                 return Ok(());
             }
         };
+        self.unload_model();
         self.publish_event(
             &namespace,
             &synth_event_id(&event_id, "synth_end"),
@@ -523,12 +385,8 @@ impl Worker {
         }
     }
 
-    fn load_model(&mut self, style_id: u32, model_path: &Path) -> Result<()> {
-        if let Some(current) = self.current_model.take() {
-            if let Err(err) = self.synth.synthesizer.unload_voice_model(current.model_id) {
-                warn!(?err, "failed to unload previous model");
-            }
-        }
+    fn load_model(&mut self, _style_id: u32, model_path: &Path) -> Result<()> {
+        self.unload_model();
 
         let model_file = VoiceModelFile::open(model_path).with_context(|| {
             format!("failed to open voice model at {}", model_path.display())
@@ -539,16 +397,20 @@ impl Worker {
             .context("failed to load voice model")?;
         let model_id = model_file.id();
 
-        self.current_model = Some(LoadedModel {
-            style_id,
-            model_id,
-        });
+        self.current_model = Some(LoadedModel { model_id });
         Ok(())
+    }
+
+    fn unload_model(&mut self) {
+        if let Some(current) = self.current_model.take() {
+            if let Err(err) = self.synth.synthesizer.unload_voice_model(current.model_id) {
+                warn!(?err, "failed to unload previous model");
+            }
+        }
     }
 }
 
 struct LoadedModel {
-    style_id: u32,
     model_id: VoiceModelId,
 }
 
@@ -1010,11 +872,6 @@ impl Config {
         })
     }
 
-    fn sorted_style_ids(&self) -> Vec<u32> {
-        let mut ids: Vec<u32> = self.style_models.keys().copied().collect();
-        ids.sort_unstable();
-        ids
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1082,10 +939,6 @@ async fn upload_audio(http: &Client, destination: &Url, wav: Vec<u8>) -> Result<
     } else {
         Err(anyhow!("upload failed with status {}", status))
     }
-}
-
-fn job_queue_name(style_id: u32) -> String {
-    format!("{JOB_QUEUE_PREFIX}{style_id}")
 }
 
 fn synth_event_id(event_id: &str, suffix: &str) -> String {
