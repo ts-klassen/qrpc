@@ -1,0 +1,5 @@
+type: g4dn.xlarge
+AMI: ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-20251015
+nvidia-driver-580
+https://packages.qrpc.jp/qrpc-0.2.1-linux-x86_64-6.8.0-ubuntu22.04.tar.gz
+https://packages.qrpc.jp/qrpc-0.2.1-linux-x86_64-6.8.0-ubuntu22.04-devel.tar.gz
