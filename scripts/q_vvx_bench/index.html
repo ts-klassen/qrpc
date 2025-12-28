@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Result.json Visualizer</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;600&family=Space+Grotesk:wght@400;600&display=swap");
+
+    :root {
+      --bg: #f7f3ee;
+      --panel: #ffffff;
+      --panel-2: #f1ebe3;
+      --ink: #1b1b1f;
+      --muted: #6c6a68;
+      --accent: #2f7d8f;
+      --accent-2: #d9803f;
+      --grid: rgba(56, 60, 66, 0.18);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 10% 10%, rgba(255, 255, 255, 0.8) 0%, transparent 60%),
+        radial-gradient(1000px 500px at 90% 20%, rgba(255, 232, 200, 0.55) 0%, transparent 55%),
+        linear-gradient(160deg, #f7f3ee 0%, #f5efe7 70%, #f3ede4 100%);
+      min-height: 100vh;
+      padding: 28px;
+    }
+
+    header {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 1fr auto;
+      align-items: end;
+    }
+
+    h1 {
+      font-family: "Space Grotesk", sans-serif;
+      font-size: clamp(24px, 3vw, 40px);
+      margin: 0;
+      letter-spacing: 0.5px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 6px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    .pill {
+      background: var(--panel);
+      border: 1px solid rgba(27, 27, 31, 0.08);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .pill strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .toolbar {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+    }
+
+    .field {
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 12px 14px;
+      border: 1px solid rgba(27, 27, 31, 0.08);
+      display: grid;
+      gap: 6px;
+    }
+
+    .field label {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .field input,
+    .field select,
+    .field button {
+      background: var(--panel-2);
+      border: 1px solid rgba(27, 27, 31, 0.1);
+      border-radius: 8px;
+      color: var(--ink);
+      font-size: 14px;
+      padding: 6px 10px;
+      font-family: inherit;
+    }
+
+    .field button {
+      cursor: pointer;
+      transition: transform 0.1s ease, background 0.2s ease;
+    }
+
+    .field button:hover {
+      transform: translateY(-1px);
+      background: #e7dfd4;
+    }
+
+    .layout {
+      margin-top: 20px;
+      display: grid;
+      gap: 18px;
+      grid-template-columns: minmax(0, 1fr) 240px;
+    }
+
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel {
+      background: rgba(255, 255, 255, 0.8);
+      border: 1px solid rgba(27, 27, 31, 0.08);
+      border-radius: 16px;
+      padding: 16px;
+      backdrop-filter: blur(6px);
+    }
+
+    .chart-wrap {
+      position: relative;
+      height: 520px;
+      overflow: auto;
+    }
+
+    svg {
+      width: 100%;
+      display: block;
+    }
+
+    .axis text {
+      fill: var(--muted);
+      font-size: 11px;
+    }
+
+    .axis path,
+    .axis line {
+      stroke: var(--grid);
+    }
+
+    .segment {
+      stroke: rgba(27, 27, 31, 0.22);
+      stroke-width: 0.5;
+      cursor: pointer;
+    }
+
+    .segment:hover {
+      stroke: #1b1b1f;
+      stroke-width: 1.1;
+    }
+
+    .tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: #ffffff;
+      border: 1px solid rgba(27, 27, 31, 0.1);
+      color: var(--ink);
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      max-width: 280px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+
+    .tooltip.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .legend {
+      display: grid;
+      gap: 8px;
+      max-height: 520px;
+      overflow: auto;
+    }
+
+    .legend-item {
+      display: grid;
+      grid-template-columns: 14px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .legend-swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      border: 1px solid rgba(27, 27, 31, 0.2);
+    }
+
+    .legend-item strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .empty-state {
+      color: var(--muted);
+      text-align: center;
+      padding: 40px 12px;
+    }
+
+    .note {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>result.json timeline</h1>
+      <div class="subtitle">Benchmark timeline per job, colored by style.</div>
+    </div>
+    <div class="controls">
+      <div class="pill">Segments: <strong id="seg-count">-</strong></div>
+      <div class="pill">Styles: <strong id="style-count">-</strong></div>
+      <div class="pill">Total span: <strong id="span-total">-</strong></div>
+      <div class="pill">Sum durations: <strong id="duration-total">-</strong></div>
+      <div class="pill">Avg duration: <strong id="duration-avg">-</strong></div>
+    </div>
+  </header>
+
+  <section class="toolbar">
+    <div class="field">
+      <label for="style-filter">Style filter</label>
+      <select id="style-filter">
+        <option value="all">All styles</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="min-text-len">Min text length</label>
+      <input id="min-text-len" type="number" min="0" value="0" />
+    </div>
+    <div class="field">
+      <label for="max-text-len">Max text length</label>
+      <input id="max-text-len" type="number" min="0" placeholder="∞" />
+    </div>
+    <div class="field">
+      <label for="min-duration">Min duration (ms)</label>
+      <input id="min-duration" type="number" min="0" value="0" />
+    </div>
+    <div class="field">
+      <label>&nbsp;</label>
+      <button id="reset-zoom">Reset zoom</button>
+    </div>
+  </section>
+
+  <section class="layout">
+    <div class="panel">
+      <div class="chart-wrap">
+        <div class="tooltip" id="tooltip"></div>
+        <svg id="chart" height="520"></svg>
+      </div>
+      <div class="note">Scroll vertically to see all jobs. Drag to pan horizontally, scroll to zoom.</div>
+    </div>
+    <aside class="panel">
+      <h3 style="margin: 0 0 10px; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);">Style legend</h3>
+      <div class="legend" id="legend"></div>
+    </aside>
+  </section>
+
+  <script>
+    const fmtMs = (value) => `${Math.round(value).toLocaleString()} ms`;
+
+    const state = {
+      data: [],
+      filtered: [],
+      styles: [],
+      color: null,
+      zoom: null,
+      transform: d3.zoomIdentity,
+    };
+
+    const tooltip = d3.select("#tooltip");
+    const svg = d3.select("#chart");
+    const legendEl = d3.select("#legend");
+    const styleFilter = d3.select("#style-filter");
+    const minTextLen = d3.select("#min-text-len");
+    const maxTextLen = d3.select("#max-text-len");
+    const minDuration = d3.select("#min-duration");
+
+    function updateStats() {
+      d3.select("#seg-count").text(state.filtered.length);
+      d3.select("#style-count").text(state.styles.length);
+
+      const totalDuration = d3.sum(state.data, (d) => d.duration_ms) || 0;
+      const avgDuration = state.data.length ? totalDuration / state.data.length : 0;
+      const maxFinish = d3.max(state.data, (d) => d.finish_ms) || 0;
+
+      d3.select("#span-total").text(fmtMs(maxFinish));
+      d3.select("#duration-total").text(fmtMs(totalDuration));
+      d3.select("#duration-avg").text(fmtMs(avgDuration));
+    }
+
+    function buildLegend() {
+      const items = legendEl.selectAll(".legend-item").data(state.styles, (d) => d);
+
+      const enter = items.enter().append("div").attr("class", "legend-item");
+      enter.append("div").attr("class", "legend-swatch");
+      enter.append("div").attr("class", "legend-label");
+      enter.append("div").attr("class", "legend-count");
+
+      const merged = enter.merge(items);
+      merged.select(".legend-swatch").style("background", (d) => state.color(d));
+      merged.select(".legend-label").html((d) => `Style <strong>${d}</strong>`);
+      merged.select(".legend-count").text((d) => {
+        const count = state.data.filter((row) => row.style_id === d).length;
+        return count;
+      });
+
+      items.exit().remove();
+    }
+
+    function applyFilters() {
+      const styleValue = styleFilter.node().value;
+      const minDur = Number(minDuration.node().value) || 0;
+      const minLen = Number(minTextLen.node().value) || 0;
+      const maxRaw = maxTextLen.node().value;
+      const maxLen = maxRaw === "" ? Infinity : Number(maxRaw);
+
+      state.filtered = state.data.filter((row) => {
+        const styleOk = styleValue === "all" || String(row.style_id) === styleValue;
+        const durOk = row.duration_ms >= minDur;
+        const lenOk = row.text_len >= minLen && row.text_len <= maxLen;
+        return styleOk && durOk && lenOk;
+      });
+
+      updateStats();
+      render();
+    }
+
+    function render() {
+      const width = svg.node().clientWidth || 800;
+      const rowHeight = 16;
+      const margin = { top: 30, right: 20, bottom: 30, left: 70 };
+      const rows = state.filtered
+        .slice()
+        .sort((a, b) => a.offset_ms - b.offset_ms)
+        .map((row, index) => ({ ...row, job_index: index + 1 }));
+      const height = Math.max(320, rows.length * rowHeight + margin.top + margin.bottom);
+
+      svg.attr("height", height);
+
+      const maxFinish = d3.max(state.data, (d) => d.finish_ms) || 1;
+      const xBase = d3.scaleLinear().domain([0, maxFinish]).range([margin.left, width - margin.right]);
+      const x = state.transform.rescaleX(xBase);
+      const y = d3.scaleBand().domain(d3.range(rows.length)).range([margin.top, height - margin.bottom]).padding(0.2);
+
+      const xAxis = (g) => g
+        .attr("class", "axis")
+        .attr("transform", `translate(0,${margin.top - 10})`)
+        .call(d3.axisTop(x).ticks(Math.min(10, width / 80)).tickFormat((d) => `${d} ms`));
+
+      const tickStep = rows.length > 120 ? 10 : rows.length > 60 ? 5 : 1;
+      const yAxis = (g) => g
+        .attr("class", "axis")
+        .attr("transform", `translate(${margin.left},0)`)
+        .call(d3.axisLeft(y)
+          .tickValues(d3.range(0, rows.length, tickStep))
+          .tickFormat((d) => `Job ${d + 1}`)
+          .tickSize(0));
+
+      svg.selectAll(".axis-x").data([null]).join("g").attr("class", "axis-x").call(xAxis);
+      svg.selectAll(".axis-y").data([null]).join("g").attr("class", "axis-y").call(yAxis);
+
+      const segments = svg.selectAll(".segment").data(rows, (d) => `job-${d.job_index}`);
+
+      segments
+        .join("rect")
+        .attr("class", "segment")
+        .attr("x", (d) => x(d.offset_ms))
+        .attr("y", (d, i) => y(i))
+        .attr("width", (d) => Math.max(1, x(d.finish_ms) - x(d.offset_ms)))
+        .attr("height", y.bandwidth())
+        .attr("fill", (d) => state.color(d.style_id))
+        .on("mouseenter", (event, d) => {
+          tooltip
+            .classed("show", true)
+            .style("left", `${event.offsetX + 16}px`)
+            .style("top", `${event.offsetY + 16}px`)
+            .html(`
+              <div><strong>Job ${d.job_index}</strong></div>
+              <div>Style: ${d.style_id}</div>
+              <div>Offset: ${fmtMs(d.offset_ms)}</div>
+              <div>Finish: ${fmtMs(d.finish_ms)}</div>
+              <div>Duration: ${fmtMs(d.duration_ms)}</div>
+              <div>Text length: ${d.text_len}</div>
+            `);
+        })
+        .on("mousemove", (event) => {
+          tooltip
+            .style("left", `${event.offsetX + 16}px`)
+            .style("top", `${event.offsetY + 16}px`);
+        })
+        .on("mouseleave", () => {
+          tooltip.classed("show", false);
+        });
+
+      if (state.filtered.length === 0) {
+        svg.selectAll(".empty").data([null]).join("text")
+          .attr("class", "empty")
+          .attr("x", width / 2)
+          .attr("y", height / 2)
+          .attr("text-anchor", "middle")
+          .attr("fill", "#7a8da5")
+          .text("No segments match the current filters.");
+      } else {
+        svg.selectAll(".empty").remove();
+      }
+    }
+
+    function setupZoom() {
+      const zoomed = ({ transform }) => {
+        state.transform = transform;
+        render();
+      };
+
+      state.zoom = d3.zoom()
+        .scaleExtent([0.5, 20])
+        .translateExtent([[0, 0], [svg.node().clientWidth, 600]])
+        .on("zoom", zoomed);
+
+      svg.call(state.zoom).call(state.zoom.transform, state.transform);
+    }
+
+    d3.select("#reset-zoom").on("click", () => {
+      state.transform = d3.zoomIdentity;
+      svg.transition().duration(200).call(state.zoom.transform, state.transform);
+    });
+
+    minTextLen.on("input", applyFilters);
+    maxTextLen.on("input", applyFilters);
+    minDuration.on("input", applyFilters);
+    styleFilter.on("change", applyFilters);
+
+    d3.json("result.json").then((data) => {
+      state.data = data.map((row) => ({
+        ...row,
+        duration_ms: row.finish_ms - row.offset_ms,
+        text_len: row.text.length,
+      }));
+
+      state.styles = Array.from(new Set(state.data.map((d) => d.style_id))).sort((a, b) => a - b);
+      state.color = d3.scaleOrdinal().domain(state.styles).range(d3.schemeTableau10.concat(d3.schemeSet3));
+
+      styleFilter.selectAll("option.style")
+        .data(state.styles)
+        .enter()
+        .append("option")
+        .attr("class", "style")
+        .attr("value", (d) => d)
+        .text((d) => `Style ${d}`);
+
+      buildLegend();
+      applyFilters();
+      setupZoom();
+
+      window.addEventListener("resize", () => {
+        render();
+        setupZoom();
+      });
+    });
+  </script>
+</body>
+</html>
