@@ -1125,8 +1125,7 @@ fn configure_library_paths(assets_dir: &Path, onnxruntime_path: &Path) {
 
 fn prepend_env_paths(name: &str, paths: &[PathBuf]) {
     let mut existing: Vec<PathBuf> = env::var_os(name)
-        .map(env::split_paths)
-        .map(|paths| paths.collect())
+        .map(|value| env::split_paths(&value).collect())
         .unwrap_or_default();
 
     let mut new_paths = Vec::new();
