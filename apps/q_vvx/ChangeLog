@@ -1,8 +1,9 @@
 UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 
 	* VERSION: 0.2.1
-	q_vvx_worker now prepends additional_libraries and onnxruntime lib paths for GPU loading.
 	q_vvx_worker config is optional and defaults when missing.
+	q_vvx_worker preloads additional GPU libraries from additional_libraries.
+	q_vvx_worker logs model load errors with style id and model path.
 
 
 2025-12-28  ts-klassen  <qrpc@su-shiki.com>

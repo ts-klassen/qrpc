@@ -2262,6 +2262,7 @@ dependencies = [
  "anyhow",
  "futures-util",
  "lapin",
+ "libc",
  "rand 0.8.5",
  "reqwest",
  "serde",

@@ -7,6 +7,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use std::ffi::CString;
 
 use anyhow::{anyhow, bail, Context, Result};
 use futures_util::StreamExt;
@@ -388,6 +389,12 @@ impl Worker {
             != Some(prepared.style_id)
         {
             if let Err(err) = self.load_model(prepared.style_id, &model_path) {
+                warn!(
+                    ?err,
+                    style_id = prepared.style_id,
+                    model_path = %model_path.display(),
+                    "failed to load voice model"
+                );
                 let message = format_failure_message(&format!("model load failed: {err}"));
                 self.metrics.record_drop().await;
                 self.ack_delivery(&delivery).await?;
@@ -520,7 +527,7 @@ impl SynthResources {
         let startup_timer = Instant::now();
         ensure_exists(&cfg.onnxruntime_path, "onnxruntime library")?;
         ensure_exists(&cfg.dict_path, "open_jtalk dictionary")?;
-        configure_library_paths(&cfg.assets_dir, &cfg.onnxruntime_path);
+        preload_additional_libraries(&cfg.assets_dir);
 
         let dict_path_str = cfg
             .dict_path
@@ -1111,35 +1118,70 @@ fn ensure_exists(path: &Path, label: &str) -> Result<()> {
     }
 }
 
-fn configure_library_paths(assets_dir: &Path, onnxruntime_path: &Path) {
-    let mut paths = Vec::new();
-    if let Some(onnx_dir) = onnxruntime_path.parent() {
-        paths.push(onnx_dir.to_path_buf());
-    }
-    let additional = assets_dir.join("additional_libraries");
-    if additional.exists() {
-        paths.push(additional);
-    }
-    prepend_env_paths("LD_LIBRARY_PATH", &paths);
-}
+fn preload_additional_libraries(assets_dir: &Path) {
+    let additional_dir = assets_dir.join("additional_libraries");
+    let entries = match fs::read_dir(&additional_dir) {
+        Ok(entries) => entries,
+        Err(err) => {
+            if err.kind() != io::ErrorKind::NotFound {
+                warn!(
+                    ?err,
+                    path = %additional_dir.display(),
+                    "failed to read additional_libraries directory"
+                );
+            }
+            return;
+        }
+    };
 
-fn prepend_env_paths(name: &str, paths: &[PathBuf]) {
-    let mut existing: Vec<PathBuf> = env::var_os(name)
-        .map(|value| env::split_paths(&value).collect())
-        .unwrap_or_default();
+    let mut libs: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.contains(".so"))
+                .unwrap_or(false)
+        })
+        .collect();
+    libs.sort_by_key(|path| {
+        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        if name == "libcudnn_ops_infer.so.8" {
+            0
+        } else {
+            1
+        }
+    });
 
-    let mut new_paths = Vec::new();
-    for path in paths {
-        if !existing.iter().any(|existing| existing == path) {
-            new_paths.push(path.clone());
+    for path in libs {
+        let c_path = match CString::new(path.to_string_lossy().as_ref()) {
+            Ok(value) => value,
+            Err(_) => {
+                warn!(path = %path.display(), "skipping invalid library path");
+                continue;
+            }
+        };
+        unsafe {
+            let handle = libc::dlopen(c_path.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL);
+            if handle.is_null() {
+                let err = libc::dlerror();
+                let detail = if err.is_null() {
+                    "unknown error".to_string()
+                } else {
+                    let msg = std::ffi::CStr::from_ptr(err);
+                    msg.to_string_lossy().into_owned()
+                };
+                warn!(
+                    path = %path.display(),
+                    error = %detail,
+                    "failed to preload additional library"
+                );
+            } else {
+                info!(path = %path.display(), "preloaded additional library");
+            }
         }
     }
-    new_paths.append(&mut existing);
-
-    if let Ok(joined) = env::join_paths(new_paths.iter()) {
-        env::set_var(name, joined);
-    }
 }
+
 
 fn collect_style_ids(model_path: &Path) -> Result<HashSet<u32>> {
     let model_file = VoiceModelFile::open(model_path)
