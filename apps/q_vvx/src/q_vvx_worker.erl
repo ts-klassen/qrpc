@@ -2,6 +2,8 @@
 
 -behaviour(gen_server).
 
+-include_lib("qrpc/include/qrpc.hrl").
+
 -export([
         start_link/1
       , stop_all/0
@@ -87,7 +89,13 @@ worker_args(Index) ->
                 <<"0.0.0">>
         end
     })),
-    ["--tlgrf_tags", binary_to_list(TagsJson)].
+    Args0 = ["--tlgrf_tags", binary_to_list(TagsJson)],
+    case ?QRPC_SUBCONF_GET(use_gpu, false) of
+        true ->
+            Args0 ++ ["--gpu"];
+        _ ->
+            Args0
+    end.
 
 stop_all() ->
     Port = open_port({spawn_executable, os:find_executable("pkill")}, [
