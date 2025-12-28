@@ -31,13 +31,15 @@ run_item(StartMs, Ref, Parent, Index, #{
     timer:sleep(Delay),
     Response = synthesize_request(StyleId, Text),
     #{payload := #{event_namespace := EventNamespace, event_id := EventId}} = Response,
-    wait_for_event(EventNamespace, EventId),
-    RequestEndMs = erlang:monotonic_time(millisecond),
+    EventTimes = wait_for_events(EventNamespace, EventId, StartMs),
+    RequestEndMs = maps:get(<<"finish_ms">>, EventTimes, elapsed_ms(StartMs)),
     Parent ! {Ref, Index, #{
         <<"offset_ms">> => Offset,
         <<"style_id">> => StyleId,
         <<"text">> => Text,
-        <<"finish_ms">> => RequestEndMs - StartMs
+        <<"syn_start_ms">> => maps:get(<<"syn_start_ms">>, EventTimes, null),
+        <<"syn_end_ms">> => maps:get(<<"syn_end_ms">>, EventTimes, null),
+        <<"finish_ms">> => RequestEndMs
     }}.
 
 collect_results(0, _Ref, Acc) ->
@@ -68,21 +70,68 @@ synthesize_request(StyleId, Text) ->
     },
     qrpc:rpc(Req).
 
-wait_for_event(Namespace, EventId) ->
-    #{payload := Events} = qrpc_event:fetch(#{
+wait_for_events(Namespace, EventId, StartMs) ->
+    Targets = #{
+        finish => EventId,
+        syn_start => synth_event_id(EventId, <<"synth_start">>),
+        syn_end => synth_event_id(EventId, <<"synth_end">>)
+    },
+    wait_for_events(Namespace, Targets, StartMs, #{}).
+
+wait_for_events(Namespace, Targets, StartMs, Acc) ->
+    case maps:is_key(<<"finish_ms">>, Acc) of
+        true ->
+            Acc;
+        false ->
+            Events = fetch_events(Namespace),
+            NowMs = elapsed_ms(StartMs),
+            Acc1 = lists:foldl(fun(Event, Acc0) ->
+                record_event(Event, Targets, NowMs, Acc0)
+            end, Acc, Events),
+            wait_for_events(Namespace, Targets, StartMs, Acc1)
+    end.
+
+fetch_events(Namespace) ->
+    try qrpc_event:fetch(#{
         payload => #{
             namespace => Namespace,
-            timeout => 3600000
+            timeout => 60000
         }
-    }),
-    case lists:search(fun(Event) ->
-        maps:get(id, Event) =:= EventId
-    end, Events) of
-        {value, _Event} ->
-            ok;
-        false ->
-            wait_for_event(Namespace, EventId)
+    }) of
+        #{payload := Events} ->
+            Events
+    catch
+        _:_ ->
+            timer:sleep(1000),
+            fetch_events(Namespace)
     end.
+
+record_event(Event, Targets, NowMs, Acc) ->
+    EventId = maps:get(id, Event),
+    FinishId = maps:get(finish, Targets),
+    SynStartId = maps:get(syn_start, Targets),
+    SynEndId = maps:get(syn_end, Targets),
+    case EventId of
+        _ when EventId =:= FinishId ->
+            maybe_put(<<"finish_ms">>, NowMs, Acc);
+        _ when EventId =:= SynStartId ->
+            maybe_put(<<"syn_start_ms">>, NowMs, Acc);
+        _ when EventId =:= SynEndId ->
+            maybe_put(<<"syn_end_ms">>, NowMs, Acc);
+        _ ->
+            Acc
+    end.
+
+maybe_put(Key, Value, Acc) ->
+    case maps:is_key(Key, Acc) of
+        true ->
+            Acc;
+        false ->
+            maps:put(Key, Value, Acc)
+    end.
+
+synth_event_id(EventId, Suffix) ->
+    <<EventId/binary, ":", Suffix/binary>>.
 
 load_scenario(Path) ->
     {ok, Bin} = file:read_file(Path),

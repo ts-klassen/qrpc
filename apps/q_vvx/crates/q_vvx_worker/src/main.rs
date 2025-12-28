@@ -47,6 +47,8 @@ const WAKE_ROUTING_KEY: &str = "wake";
 const JOB_QUEUE_PREFIX: &str = "q_vvx_tts_";
 const MESSAGE_ON_COMPLETE: &str = "q_vvx_worker:upload_complete";
 const MESSAGE_ON_FAILED: &str = "q_vvx_worker:upload_failed";
+const MESSAGE_ON_SYNTH_START: &str = "q_vvx_worker:synth_start";
+const MESSAGE_ON_SYNTH_END: &str = "q_vvx_worker:synth_end";
 const MAX_TEXT_BYTES: usize = 1500;
 const EVENT_QUEUE_TTL_MS: i64 = 3_600_000;
 const EVENT_QUEUE_EXPIRES_MS: i64 = 3_900_000;
@@ -406,6 +408,12 @@ impl Worker {
             }
         }
 
+        self.publish_event(
+            &namespace,
+            &synth_event_id(&event_id, "synth_start"),
+            MESSAGE_ON_SYNTH_START,
+        )
+        .await;
         let synth_timer = Instant::now();
         let wav = match self.synth.synthesize(&prepared.text, prepared.style_id) {
             Ok(wav) => wav,
@@ -417,6 +425,12 @@ impl Worker {
                 return Ok(());
             }
         };
+        self.publish_event(
+            &namespace,
+            &synth_event_id(&event_id, "synth_end"),
+            MESSAGE_ON_SYNTH_END,
+        )
+        .await;
         let synth_duration_ms = elapsed_ms(synth_timer);
         let wav_bytes = wav.len() as i64;
 
@@ -490,6 +504,12 @@ impl Worker {
                 error!(?err, "failed to publish event");
             }
         });
+    }
+
+    async fn publish_event(&self, namespace: &str, event_id: &str, message: &str) {
+        if let Err(err) = self.event_publisher.publish(namespace, event_id, message).await {
+            error!(?err, "failed to publish event");
+        }
     }
 
     fn load_model(&mut self, style_id: u32, model_path: &Path) -> Result<()> {
@@ -1048,6 +1068,10 @@ async fn upload_audio(http: &Client, destination: &Url, wav: Vec<u8>) -> Result<
 
 fn job_queue_name(style_id: u32) -> String {
     format!("{JOB_QUEUE_PREFIX}{style_id}")
+}
+
+fn synth_event_id(event_id: &str, suffix: &str) -> String {
+    format!("{event_id}:{suffix}")
 }
 
 fn format_failure_message(err: impl std::fmt::Display) -> String {

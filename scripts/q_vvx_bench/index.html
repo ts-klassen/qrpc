@@ -2,21 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, maximum-scale=1" />
   <title>Result.json Visualizer</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
     @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;600&family=Space+Grotesk:wght@400;600&display=swap");
 
     :root {
-      --bg: #f7f3ee;
-      --panel: #ffffff;
-      --panel-2: #f1ebe3;
-      --ink: #1b1b1f;
-      --muted: #6c6a68;
-      --accent: #2f7d8f;
-      --accent-2: #d9803f;
-      --grid: rgba(56, 60, 66, 0.18);
+      --bg: #f4f1ea;
+      --panel: #fffdf8;
+      --panel-2: #efe9dd;
+      --ink: #1b1b1b;
+      --muted: #6a645a;
+      --accent: #205c67;
+      --accent-2: #f2b468;
+      --grid: rgba(49, 52, 58, 0.2);
     }
 
     * {
@@ -28,9 +28,9 @@
       font-family: "IBM Plex Sans", sans-serif;
       color: var(--ink);
       background:
-        radial-gradient(1200px 600px at 10% 10%, rgba(255, 255, 255, 0.8) 0%, transparent 60%),
-        radial-gradient(1000px 500px at 90% 20%, rgba(255, 232, 200, 0.55) 0%, transparent 55%),
-        linear-gradient(160deg, #f7f3ee 0%, #f5efe7 70%, #f3ede4 100%);
+        radial-gradient(1200px 700px at 10% 15%, rgba(255, 255, 255, 0.9) 0%, transparent 62%),
+        radial-gradient(900px 520px at 85% 15%, rgba(251, 219, 178, 0.45) 0%, transparent 60%),
+        linear-gradient(150deg, #f4f1ea 0%, #f1ebe1 60%, #ede5d8 100%);
       min-height: 100vh;
       padding: 28px;
     }
@@ -76,51 +76,6 @@
       font-weight: 600;
     }
 
-    .toolbar {
-      margin-top: 18px;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 12px;
-    }
-
-    .field {
-      background: var(--panel);
-      border-radius: 12px;
-      padding: 12px 14px;
-      border: 1px solid rgba(27, 27, 31, 0.08);
-      display: grid;
-      gap: 6px;
-    }
-
-    .field label {
-      font-size: 12px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .field input,
-    .field select,
-    .field button {
-      background: var(--panel-2);
-      border: 1px solid rgba(27, 27, 31, 0.1);
-      border-radius: 8px;
-      color: var(--ink);
-      font-size: 14px;
-      padding: 6px 10px;
-      font-family: inherit;
-    }
-
-    .field button {
-      cursor: pointer;
-      transition: transform 0.1s ease, background 0.2s ease;
-    }
-
-    .field button:hover {
-      transform: translateY(-1px);
-      background: #e7dfd4;
-    }
-
     .layout {
       margin-top: 20px;
       display: grid;
@@ -139,7 +94,7 @@
       border: 1px solid rgba(27, 27, 31, 0.08);
       border-radius: 16px;
       padding: 16px;
-      backdrop-filter: blur(6px);
+      backdrop-filter: blur(4px);
     }
 
     .chart-wrap {
@@ -164,14 +119,19 @@
     }
 
     .segment {
-      stroke: rgba(27, 27, 31, 0.22);
-      stroke-width: 0.5;
+      stroke: rgba(27, 27, 31, 0.35);
+      stroke-width: 0.7;
       cursor: pointer;
     }
 
     .segment:hover {
       stroke: #1b1b1f;
       stroke-width: 1.1;
+    }
+
+    .segment-synth {
+      pointer-events: none;
+      opacity: 0.95;
     }
 
     .tooltip {
@@ -245,36 +205,17 @@
     <div class="controls">
       <div class="pill">Segments: <strong id="seg-count">-</strong></div>
       <div class="pill">Styles: <strong id="style-count">-</strong></div>
-      <div class="pill">Total span: <strong id="span-total">-</strong></div>
-      <div class="pill">Sum durations: <strong id="duration-total">-</strong></div>
-      <div class="pill">Avg duration: <strong id="duration-avg">-</strong></div>
+      <div class="pill">All done by: <strong id="span-total">-</strong></div>
+      <div class="pill">Synth sum: <strong id="synth-total">-</strong></div>
+      <div class="pill">Synth avg: <strong id="synth-avg">-</strong></div>
+      <div class="pill">Synth/len sum: <strong id="synth-len-total">-</strong></div>
+      <div class="pill">Synth/len avg: <strong id="synth-len-avg">-</strong></div>
+      <div class="pill">Wait sum: <strong id="wait-total">-</strong></div>
+      <div class="pill">Wait avg: <strong id="wait-avg">-</strong></div>
+      <div class="pill">Wait/len sum: <strong id="wait-len-total">-</strong></div>
+      <div class="pill">Wait/len avg: <strong id="wait-len-avg">-</strong></div>
     </div>
   </header>
-
-  <section class="toolbar">
-    <div class="field">
-      <label for="style-filter">Style filter</label>
-      <select id="style-filter">
-        <option value="all">All styles</option>
-      </select>
-    </div>
-    <div class="field">
-      <label for="min-text-len">Min text length</label>
-      <input id="min-text-len" type="number" min="0" value="0" />
-    </div>
-    <div class="field">
-      <label for="max-text-len">Max text length</label>
-      <input id="max-text-len" type="number" min="0" placeholder="∞" />
-    </div>
-    <div class="field">
-      <label for="min-duration">Min duration (ms)</label>
-      <input id="min-duration" type="number" min="0" value="0" />
-    </div>
-    <div class="field">
-      <label>&nbsp;</label>
-      <button id="reset-zoom">Reset zoom</button>
-    </div>
-  </section>
 
   <section class="layout">
     <div class="panel">
@@ -282,45 +223,67 @@
         <div class="tooltip" id="tooltip"></div>
         <svg id="chart" height="520"></svg>
       </div>
-      <div class="note">Scroll vertically to see all jobs. Drag to pan horizontally, scroll to zoom.</div>
+      <div class="note">Scroll vertically to see all jobs.</div>
     </div>
     <aside class="panel">
       <h3 style="margin: 0 0 10px; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);">Style legend</h3>
       <div class="legend" id="legend"></div>
+      <div class="note">Colored bands show synth time.</div>
     </aside>
   </section>
 
   <script>
     const fmtMs = (value) => `${Math.round(value).toLocaleString()} ms`;
+    const fmtRate = (value) => `${value.toFixed(2)} ms/char`;
+    const toMs = (value) => (typeof value === "number" && Number.isFinite(value) ? value : null);
 
     const state = {
       data: [],
       filtered: [],
       styles: [],
       color: null,
-      zoom: null,
-      transform: d3.zoomIdentity,
     };
 
     const tooltip = d3.select("#tooltip");
     const svg = d3.select("#chart");
     const legendEl = d3.select("#legend");
-    const styleFilter = d3.select("#style-filter");
-    const minTextLen = d3.select("#min-text-len");
-    const maxTextLen = d3.select("#max-text-len");
-    const minDuration = d3.select("#min-duration");
 
     function updateStats() {
       d3.select("#seg-count").text(state.filtered.length);
       d3.select("#style-count").text(state.styles.length);
 
-      const totalDuration = d3.sum(state.data, (d) => d.duration_ms) || 0;
-      const avgDuration = state.data.length ? totalDuration / state.data.length : 0;
+      const synthRows = state.data.filter((d) => d.syn_start_ms !== null && d.syn_end_ms !== null);
+      const synthDurations = synthRows.map((d) => Math.max(0, d.syn_end_ms - d.syn_start_ms));
+      const synthTotal = d3.sum(synthDurations) || 0;
+      const synthAvg = synthDurations.length ? synthTotal / synthDurations.length : 0;
+
+      const synthPerLenValues = synthRows
+        .filter((d) => d.text_len > 0)
+        .map((d) => Math.max(0, d.syn_end_ms - d.syn_start_ms) / d.text_len);
+      const synthPerLenTotal = d3.sum(synthPerLenValues) || 0;
+      const synthPerLenAvg = synthPerLenValues.length ? synthPerLenTotal / synthPerLenValues.length : 0;
+
+      const waitDurations = state.data.map((d) => d.duration_ms);
+      const waitTotal = d3.sum(waitDurations) || 0;
+      const waitAvg = state.data.length ? waitTotal / state.data.length : 0;
+
+      const waitPerLenValues = state.data
+        .filter((d) => d.text_len > 0)
+        .map((d) => d.duration_ms / d.text_len);
+      const waitPerLenTotal = d3.sum(waitPerLenValues) || 0;
+      const waitPerLenAvg = waitPerLenValues.length ? waitPerLenTotal / waitPerLenValues.length : 0;
+
       const maxFinish = d3.max(state.data, (d) => d.finish_ms) || 0;
 
       d3.select("#span-total").text(fmtMs(maxFinish));
-      d3.select("#duration-total").text(fmtMs(totalDuration));
-      d3.select("#duration-avg").text(fmtMs(avgDuration));
+      d3.select("#synth-total").text(fmtMs(synthTotal));
+      d3.select("#synth-avg").text(fmtMs(synthAvg));
+      d3.select("#synth-len-total").text(fmtRate(synthPerLenTotal));
+      d3.select("#synth-len-avg").text(fmtRate(synthPerLenAvg));
+      d3.select("#wait-total").text(fmtMs(waitTotal));
+      d3.select("#wait-avg").text(fmtMs(waitAvg));
+      d3.select("#wait-len-total").text(fmtRate(waitPerLenTotal));
+      d3.select("#wait-len-avg").text(fmtRate(waitPerLenAvg));
     }
 
     function buildLegend() {
@@ -342,20 +305,8 @@
       items.exit().remove();
     }
 
-    function applyFilters() {
-      const styleValue = styleFilter.node().value;
-      const minDur = Number(minDuration.node().value) || 0;
-      const minLen = Number(minTextLen.node().value) || 0;
-      const maxRaw = maxTextLen.node().value;
-      const maxLen = maxRaw === "" ? Infinity : Number(maxRaw);
-
-      state.filtered = state.data.filter((row) => {
-        const styleOk = styleValue === "all" || String(row.style_id) === styleValue;
-        const durOk = row.duration_ms >= minDur;
-        const lenOk = row.text_len >= minLen && row.text_len <= maxLen;
-        return styleOk && durOk && lenOk;
-      });
-
+    function refresh() {
+      state.filtered = state.data.slice();
       updateStats();
       render();
     }
@@ -367,14 +318,14 @@
       const rows = state.filtered
         .slice()
         .sort((a, b) => a.offset_ms - b.offset_ms)
-        .map((row, index) => ({ ...row, job_index: index + 1 }));
+        .map((row, index) => ({ ...row, job_index: index + 1, row_index: index }));
       const height = Math.max(320, rows.length * rowHeight + margin.top + margin.bottom);
 
       svg.attr("height", height);
 
       const maxFinish = d3.max(state.data, (d) => d.finish_ms) || 1;
       const xBase = d3.scaleLinear().domain([0, maxFinish]).range([margin.left, width - margin.right]);
-      const x = state.transform.rescaleX(xBase);
+      const x = xBase;
       const y = d3.scaleBand().domain(d3.range(rows.length)).range([margin.top, height - margin.bottom]).padding(0.2);
 
       const xAxis = (g) => g
@@ -400,11 +351,14 @@
         .join("rect")
         .attr("class", "segment")
         .attr("x", (d) => x(d.offset_ms))
-        .attr("y", (d, i) => y(i))
+        .attr("y", (d) => y(d.row_index))
         .attr("width", (d) => Math.max(1, x(d.finish_ms) - x(d.offset_ms)))
         .attr("height", y.bandwidth())
-        .attr("fill", (d) => state.color(d.style_id))
+        .attr("fill", "transparent")
         .on("mouseenter", (event, d) => {
+          const synthStart = d.syn_start_ms;
+          const synthEnd = d.syn_end_ms;
+          const synthDuration = synthStart !== null && synthEnd !== null ? synthEnd - synthStart : null;
           tooltip
             .classed("show", true)
             .style("left", `${event.offsetX + 16}px`)
@@ -413,6 +367,9 @@
               <div><strong>Job ${d.job_index}</strong></div>
               <div>Style: ${d.style_id}</div>
               <div>Offset: ${fmtMs(d.offset_ms)}</div>
+              <div>Synth start: ${synthStart === null ? "n/a" : fmtMs(synthStart)}</div>
+              <div>Synth end: ${synthEnd === null ? "n/a" : fmtMs(synthEnd)}</div>
+              <div>Synth duration: ${synthDuration === null ? "n/a" : fmtMs(synthDuration)}</div>
               <div>Finish: ${fmtMs(d.finish_ms)}</div>
               <div>Duration: ${fmtMs(d.duration_ms)}</div>
               <div>Text length: ${d.text_len}</div>
@@ -427,6 +384,20 @@
           tooltip.classed("show", false);
         });
 
+      const synthSegments = svg.selectAll(".segment-synth").data(
+        rows.filter((row) => row.syn_start_ms !== null && row.syn_end_ms !== null),
+        (d) => `synth-${d.job_index}`
+      );
+
+      synthSegments
+        .join("rect")
+        .attr("class", "segment-synth")
+        .attr("x", (d) => x(d.syn_start_ms))
+        .attr("y", (d) => y(d.row_index))
+        .attr("width", (d) => Math.max(1, x(d.syn_end_ms) - x(d.syn_start_ms)))
+        .attr("height", y.bandwidth())
+        .attr("fill", (d) => state.color(d.style_id));
+
       if (state.filtered.length === 0) {
         svg.selectAll(".empty").data([null]).join("text")
           .attr("class", "empty")
@@ -440,33 +411,11 @@
       }
     }
 
-    function setupZoom() {
-      const zoomed = ({ transform }) => {
-        state.transform = transform;
-        render();
-      };
-
-      state.zoom = d3.zoom()
-        .scaleExtent([0.5, 20])
-        .translateExtent([[0, 0], [svg.node().clientWidth, 600]])
-        .on("zoom", zoomed);
-
-      svg.call(state.zoom).call(state.zoom.transform, state.transform);
-    }
-
-    d3.select("#reset-zoom").on("click", () => {
-      state.transform = d3.zoomIdentity;
-      svg.transition().duration(200).call(state.zoom.transform, state.transform);
-    });
-
-    minTextLen.on("input", applyFilters);
-    maxTextLen.on("input", applyFilters);
-    minDuration.on("input", applyFilters);
-    styleFilter.on("change", applyFilters);
-
     d3.json("result.json").then((data) => {
       state.data = data.map((row) => ({
         ...row,
+        syn_start_ms: toMs(row.syn_start_ms),
+        syn_end_ms: toMs(row.syn_end_ms),
         duration_ms: row.finish_ms - row.offset_ms,
         text_len: row.text.length,
       }));
@@ -474,21 +423,11 @@
       state.styles = Array.from(new Set(state.data.map((d) => d.style_id))).sort((a, b) => a - b);
       state.color = d3.scaleOrdinal().domain(state.styles).range(d3.schemeTableau10.concat(d3.schemeSet3));
 
-      styleFilter.selectAll("option.style")
-        .data(state.styles)
-        .enter()
-        .append("option")
-        .attr("class", "style")
-        .attr("value", (d) => d)
-        .text((d) => `Style ${d}`);
-
       buildLegend();
-      applyFilters();
-      setupZoom();
+      refresh();
 
       window.addEventListener("resize", () => {
         render();
-        setupZoom();
       });
     });
   </script>
