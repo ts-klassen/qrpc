@@ -2,13 +2,16 @@
 
 -export([synthesize/1]).
 
+-define(PROGRESS_EVERY, 10).
+
 synthesize(#{scenario := ScenarioPath, result := ResultPath}) ->
     Items = load_scenario(ScenarioPath),
     StartMs = erlang:monotonic_time(millisecond),
     Ref = make_ref(),
     Parent = self(),
     spawn_items(Items, StartMs, Ref, Parent),
-    Results = collect_results(length(Items), Ref, #{}),
+    Total = length(Items),
+    Results = collect_results(Total, Total, Ref, #{}),
     ok = file:write_file(ResultPath, iolist_to_binary(json:encode(Results))),
     Results.
 
@@ -43,14 +46,21 @@ run_item(StartMs, Ref, Parent, Index, #{
         <<"finish_ms">> => RequestEndMs
     }}.
 
-collect_results(0, _Ref, Acc) ->
+collect_results(0, _Total, _Ref, Acc) ->
     lists:map(fun(Index) ->
         maps:get(Index, Acc)
     end, lists:seq(1, map_size(Acc)));
-collect_results(Count, Ref, Acc) ->
+collect_results(Count, Total, Ref, Acc) ->
     receive
         {Ref, Index, Result} ->
-            collect_results(Count - 1, Ref, maps:put(Index, Result, Acc))
+            Received = Total - Count + 1,
+            case Received rem ?PROGRESS_EVERY of
+                0 ->
+                    io:format("q_vvx_bench progress: ~p/~p~n", [Received, Total]);
+                _ ->
+                    ok
+            end,
+            collect_results(Count - 1, Total, Ref, maps:put(Index, Result, Acc))
     end.
 
 elapsed_ms(StartMs) ->
