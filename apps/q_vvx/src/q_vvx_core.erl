@@ -8,7 +8,7 @@
     ]).
 
 -define(MAX_TEXT_BYTES, 1500).
--define(MINUTELY_LIMIT, 10000).
+-define(MINUTELY_LIMIT, 10000000).
 -define(MAX_STYLE_ID, 4294967295).
 -define(DEFAULT_MODELS_PATH, <<"/opt/qrpc/pkg/etc/voicevox_core/models.json">>).
 -define(STYLE_LIST_CACHE_KEY, {?MODULE, style_list}).
