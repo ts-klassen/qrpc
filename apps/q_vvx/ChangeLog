@@ -4,6 +4,7 @@ UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 	q_vvx_worker config is optional and defaults when missing.
 	q_vvx_worker preloads additional GPU libraries from additional_libraries.
 	q_vvx_worker logs model load errors with style id and model path.
+	q_vvx_worker adds a --gpu flag to opt into GPU synthesis (CPU by default).
 
 
 2025-12-28  ts-klassen  <qrpc@su-shiki.com>

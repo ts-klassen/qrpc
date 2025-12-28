@@ -30,6 +30,7 @@ use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use voicevox_core::{
     blocking::{Onnxruntime, OpenJtalk, Synthesizer, VoiceModelFile},
+    AccelerationMode,
     StyleId, VoiceModelId,
 };
 
@@ -50,6 +51,7 @@ const MAX_TEXT_BYTES: usize = 1500;
 const EVENT_QUEUE_TTL_MS: i64 = 3_600_000;
 const EVENT_QUEUE_EXPIRES_MS: i64 = 3_900_000;
 const CONFIG_ARG: &str = "--config";
+const GPU_ARG: &str = "--gpu";
 const TLGRF_TAGS_ARG: &str = "--tlgrf_tegs";
 const TLGRF_TAGS_ARG_ALT: &str = "--tlgrf_tags";
 const DEFAULT_TELEGRAF_SOCKET: &str = "/tmp/telegraf.sock";
@@ -68,9 +70,10 @@ async fn main() -> Result<()> {
     let Args {
         config_path,
         tlgrf_tags,
+        enable_gpu,
     } = Args::parse()?;
     let cfg = Config::load(&config_path)?;
-    let (synth, startup) = SynthResources::new(&cfg)?;
+    let (synth, startup) = SynthResources::new(&cfg, enable_gpu)?;
     let metrics = Metrics::new(tlgrf_tags, &synth);
     metrics.record_startup(startup).await;
     let http = Client::builder()
@@ -523,7 +526,7 @@ struct SynthResources {
 }
 
 impl SynthResources {
-    fn new(cfg: &Config) -> Result<(Self, StartupTimings)> {
+    fn new(cfg: &Config, enable_gpu: bool) -> Result<(Self, StartupTimings)> {
         let startup_timer = Instant::now();
         ensure_exists(&cfg.onnxruntime_path, "onnxruntime library")?;
         ensure_exists(&cfg.dict_path, "open_jtalk dictionary")?;
@@ -545,10 +548,11 @@ impl SynthResources {
             OpenJtalk::new(dict_path_str).context("failed to initialize OpenJTalk")?;
         let openjtalk_init_ms = elapsed_ms(openjtalk_timer);
         let synthesizer_timer = Instant::now();
-        let synthesizer = Synthesizer::builder(ort)
-            .text_analyzer(text_analyzer)
-            .build()
-            .context("failed to build synthesizer")?;
+        let mut builder = Synthesizer::builder(ort).text_analyzer(text_analyzer);
+        if !enable_gpu {
+            builder = builder.acceleration_mode(AccelerationMode::Cpu);
+        }
+        let synthesizer = builder.build().context("failed to build synthesizer")?;
         let synthesizer_build_ms = elapsed_ms(synthesizer_timer);
         let startup_total_ms = elapsed_ms(startup_timer);
 
@@ -843,12 +847,14 @@ impl EventPublisher {
 struct Args {
     config_path: PathBuf,
     tlgrf_tags: HashMap<String, String>,
+    enable_gpu: bool,
 }
 
 impl Args {
     fn parse() -> Result<Self> {
         let mut config_path = None;
         let mut tlgrf_tags = HashMap::new();
+        let mut enable_gpu = false;
         let mut args = env::args().skip(1);
         while let Some(arg) = args.next() {
             if arg == CONFIG_ARG {
@@ -884,11 +890,17 @@ impl Args {
                 merge_tlgrf_tags_json(&mut tlgrf_tags, value)?;
                 continue;
             }
+
+            if arg == GPU_ARG {
+                enable_gpu = true;
+                continue;
+            }
         }
 
         Ok(Self {
             config_path: config_path.unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_PATH)),
             tlgrf_tags,
+            enable_gpu,
         })
     }
 }
