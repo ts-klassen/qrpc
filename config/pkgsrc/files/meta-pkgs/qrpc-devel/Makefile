@@ -1,4 +1,4 @@
-DISTNAME=       qrpc-devel-0.2.1
+DISTNAME=       qrpc-devel-0.3.0
 CATEGORIES=     meta-pkgs www
 MASTER_SITES=   # empty
 
@@ -8,6 +8,7 @@ COMMENT=        All you need to build qrpc
 DEPENDS+=       rust-bin>=1.90.0:../../lang/rust-bin
 DEPENDS+=       rebar3>=3.24.0:../../devel/rebar3
 DEPENDS+=       pkgconf>=2.4.3:../../devel/pkgconf
+DEPENDS+=       cmake>=4.2.1:../../devel/cmake
 DEPENDS+=       zip>=3.0:../../archivers/zip
 DEPENDS+=       unzip>=6.0:../../archivers/unzip
 DEPENDS+=       jq>=1.8.1:../../devel/jq

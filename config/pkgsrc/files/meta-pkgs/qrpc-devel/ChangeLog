@@ -1,10 +1,11 @@
 UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 
-	* VERSION: 0.2.1
+	* VERSION: 0.3.0
 	* PACKAGE VERSIONS:
 		* rust-bin: 1.90.0
 		* rebar3: 3.24.0
 		* pkgconf: 2.4.3
+		* cmake: 4.2.1
 		* zip: 3.0
 		* unzip: 6.0
 		* jq: 1.8.1
@@ -12,6 +13,7 @@ UNRELEASED  ts-klassen  <qrpc@su-shiki.com>
 		* pkg_tarup: 1.9.1
 		* ansible: 12.1.0
 	Remove mit-krb5 from qrpc-devel dependencies.
+	Add cmake to qrpc-devel dependencies.
 
 
 2025-12-28  ts-klassen  <qrpc@su-shiki.com>
