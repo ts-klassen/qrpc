@@ -56,6 +56,7 @@ const CONFIG_ARG: &str = "--config";
 const GPU_ARG: &str = "--gpu";
 const TLGRF_TAGS_ARG: &str = "--tlgrf_tegs";
 const TLGRF_TAGS_ARG_ALT: &str = "--tlgrf_tags";
+const WORKER_ID_TAG: &str = "q_vvx_worker_index";
 const DEFAULT_TELEGRAF_SOCKET: &str = "/tmp/telegraf.sock";
 const METRICS_MEASUREMENT: &str = "q_vvx_worker";
 const METRICS_KIND_TAG: &str = "metric_kind";
@@ -76,6 +77,7 @@ async fn main() -> Result<()> {
     } = Args::parse()?;
     let cfg = Config::load(&config_path)?;
     let (synth, startup) = SynthResources::new(&cfg, enable_gpu)?;
+    let worker_id = tlgrf_tags.get(WORKER_ID_TAG).cloned();
     let metrics = Metrics::new(tlgrf_tags, &synth);
     metrics.record_startup(startup).await;
     let http = Client::builder()
@@ -83,7 +85,10 @@ async fn main() -> Result<()> {
         .build()
         .context("failed to build HTTP client")?;
 
-    Worker::new(cfg, synth, http, metrics).await?.run().await
+    Worker::new(cfg, synth, http, metrics, worker_id)
+        .await?
+        .run()
+        .await
 }
 
 struct Worker {
@@ -100,7 +105,13 @@ struct Worker {
 }
 
 impl Worker {
-    async fn new(cfg: Config, synth: SynthResources, http: Client, metrics: Metrics) -> Result<Self> {
+    async fn new(
+        cfg: Config,
+        synth: SynthResources,
+        http: Client,
+        metrics: Metrics,
+        worker_id: Option<String>,
+    ) -> Result<Self> {
         info!(amqp = %cfg.amqp_addr, "starting q_vvx_worker");
 
         let conn = Connection::connect(&cfg.amqp_addr, ConnectionProperties::default())
@@ -228,7 +239,7 @@ impl Worker {
             _conn: conn,
             job_channel,
             wake_consumer,
-            event_publisher: EventPublisher::new(event_channel),
+            event_publisher: EventPublisher::new(event_channel, worker_id),
             metrics,
             style_ids,
             current_model: None,
@@ -783,23 +794,30 @@ impl MetricsState {
 struct EventPublisher {
     channel: Channel,
     declared_namespaces: std::sync::Arc<Mutex<HashSet<String>>>,
+    worker_id: Option<String>,
 }
 
 impl EventPublisher {
-    fn new(channel: Channel) -> Self {
+    fn new(channel: Channel, worker_id: Option<String>) -> Self {
         Self {
             channel,
             declared_namespaces: std::sync::Arc::new(Mutex::new(HashSet::new())),
+            worker_id,
         }
     }
 
     async fn publish(&self, namespace: &str, event_id: &str, message: &str) -> Result<()> {
         self.ensure_namespace_bound(namespace).await?;
-        let payload = json!({
+        let mut payload = json!({
             "namespace": namespace,
             "id": event_id,
             "message": message,
         });
+        if let Some(worker_id) = self.worker_id.as_deref() {
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("worker_id".to_string(), json!(worker_id));
+            }
+        }
         let payload = serde_json::to_vec(&payload)
             .map_err(|err| anyhow!("failed to encode event payload: {err}"))?;
 

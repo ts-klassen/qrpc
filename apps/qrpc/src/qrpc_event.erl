@@ -26,6 +26,7 @@
         namespace := namespace()
       , id := id()
       , message => message()
+      , worker_id => klsn:binstr()
     }.
 
 -type fetch_payload() :: #{
@@ -360,6 +361,7 @@ event_payload_rule() ->
         namespace => {r, binstr}
       , id => {r, binstr}
       , message => {o, binstr}
+      , worker_id => {o, binstr}
     }.
 
 -spec fetch_payload_rule() -> qrpc_sanitizer:rule().

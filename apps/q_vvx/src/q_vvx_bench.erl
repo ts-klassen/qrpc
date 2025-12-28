@@ -37,6 +37,7 @@ run_item(StartMs, Ref, Parent, Index, #{
         <<"offset_ms">> => Offset,
         <<"style_id">> => StyleId,
         <<"text">> => Text,
+        <<"worker_id">> => maps:get(<<"worker_id">>, EventTimes, null),
         <<"syn_start_ms">> => maps:get(<<"syn_start_ms">>, EventTimes, null),
         <<"syn_end_ms">> => maps:get(<<"syn_end_ms">>, EventTimes, null),
         <<"finish_ms">> => RequestEndMs
@@ -111,15 +112,21 @@ record_event(Event, Targets, NowMs, Acc) ->
     FinishId = maps:get(finish, Targets),
     SynStartId = maps:get(syn_start, Targets),
     SynEndId = maps:get(syn_end, Targets),
+    Acc1 = case maps:get(worker_id, Event, undefined) of
+        undefined ->
+            Acc;
+        WorkerId ->
+            maybe_put(<<"worker_id">>, WorkerId, Acc)
+    end,
     case EventId of
         _ when EventId =:= FinishId ->
-            maybe_put(<<"finish_ms">>, NowMs, Acc);
+            maybe_put(<<"finish_ms">>, NowMs, Acc1);
         _ when EventId =:= SynStartId ->
-            maybe_put(<<"syn_start_ms">>, NowMs, Acc);
+            maybe_put(<<"syn_start_ms">>, NowMs, Acc1);
         _ when EventId =:= SynEndId ->
-            maybe_put(<<"syn_end_ms">>, NowMs, Acc);
+            maybe_put(<<"syn_end_ms">>, NowMs, Acc1);
         _ ->
-            Acc
+            Acc1
     end.
 
 maybe_put(Key, Value, Acc) ->

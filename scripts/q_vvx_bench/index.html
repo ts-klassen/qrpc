@@ -76,6 +76,23 @@
       font-weight: 600;
     }
 
+    .pill select {
+      margin-left: 6px;
+      border: none;
+      background: transparent;
+      font-weight: 600;
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .pill select:focus {
+      outline: 1px solid rgba(32, 92, 103, 0.4);
+      outline-offset: 2px;
+      border-radius: 6px;
+    }
+
     .layout {
       margin-top: 20px;
       display: grid;
@@ -205,6 +222,12 @@
     <div class="controls">
       <div class="pill">Segments: <strong id="seg-count">-</strong></div>
       <div class="pill">Styles: <strong id="style-count">-</strong></div>
+      <div class="pill">Workers: <strong id="worker-count">-</strong></div>
+      <label class="pill">Worker filter:
+        <select id="worker-filter">
+          <option value="all">All</option>
+        </select>
+      </label>
       <div class="pill">All done by: <strong id="span-total">-</strong></div>
       <div class="pill">Synth sum: <strong id="synth-total">-</strong></div>
       <div class="pill">Synth avg: <strong id="synth-avg">-</strong></div>
@@ -241,18 +264,63 @@
       data: [],
       filtered: [],
       styles: [],
+      workerIds: [],
+      workerFilter: "all",
       color: null,
     };
 
     const tooltip = d3.select("#tooltip");
     const svg = d3.select("#chart");
     const legendEl = d3.select("#legend");
+    const workerFilter = d3.select("#worker-filter");
+
+    const layout = {
+      rowHeight: 22,
+      margin: { top: 30, right: 20, bottom: 30, left: 90 },
+    };
+
+    function numericSort(a, b) {
+      const aNum = Number(a);
+      const bNum = Number(b);
+      if (Number.isFinite(aNum) && Number.isFinite(bNum)) {
+        return aNum - bNum;
+      }
+      return String(a).localeCompare(String(b));
+    }
+
+    function normalizeData(rows) {
+      return rows.map((row, index) => ({
+        ...row,
+        id: index + 1,
+        syn_start_ms: toMs(row.syn_start_ms),
+        syn_end_ms: toMs(row.syn_end_ms),
+        duration_ms: row.finish_ms - row.offset_ms,
+        text_len: row.text.length,
+        worker_id: row.worker_id ?? null,
+      }));
+    }
+
+    function updateDerived() {
+      state.styles = Array.from(new Set(state.data.map((d) => d.style_id))).sort((a, b) => a - b);
+      state.workerIds = Array.from(new Set(state.data.map((d) => d.worker_id).filter(Boolean))).sort(numericSort);
+      state.color = d3.scaleOrdinal().domain(state.styles).range(d3.schemeTableau10.concat(d3.schemeSet3));
+    }
+
+    function updateFilter() {
+      if (state.workerFilter === "all") {
+        state.filtered = state.data.slice();
+      } else {
+        state.filtered = state.data.filter((row) => row.worker_id === state.workerFilter);
+      }
+    }
 
     function updateStats() {
-      d3.select("#seg-count").text(state.filtered.length);
+      const rows = state.filtered;
+      d3.select("#seg-count").text(rows.length);
       d3.select("#style-count").text(state.styles.length);
+      d3.select("#worker-count").text(state.workerIds.length);
 
-      const synthRows = state.data.filter((d) => d.syn_start_ms !== null && d.syn_end_ms !== null);
+      const synthRows = rows.filter((d) => d.syn_start_ms !== null && d.syn_end_ms !== null);
       const synthDurations = synthRows.map((d) => Math.max(0, d.syn_end_ms - d.syn_start_ms));
       const synthTotal = d3.sum(synthDurations) || 0;
       const synthAvg = synthDurations.length ? synthTotal / synthDurations.length : 0;
@@ -263,17 +331,17 @@
       const synthPerLenTotal = d3.sum(synthPerLenValues) || 0;
       const synthPerLenAvg = synthPerLenValues.length ? synthPerLenTotal / synthPerLenValues.length : 0;
 
-      const waitDurations = state.data.map((d) => d.duration_ms);
+      const waitDurations = rows.map((d) => d.duration_ms);
       const waitTotal = d3.sum(waitDurations) || 0;
-      const waitAvg = state.data.length ? waitTotal / state.data.length : 0;
+      const waitAvg = rows.length ? waitTotal / rows.length : 0;
 
-      const waitPerLenValues = state.data
+      const waitPerLenValues = rows
         .filter((d) => d.text_len > 0)
         .map((d) => d.duration_ms / d.text_len);
       const waitPerLenTotal = d3.sum(waitPerLenValues) || 0;
       const waitPerLenAvg = waitPerLenValues.length ? waitPerLenTotal / waitPerLenValues.length : 0;
 
-      const maxFinish = d3.max(state.data, (d) => d.finish_ms) || 0;
+      const maxFinish = d3.max(rows, (d) => d.finish_ms) || 0;
 
       d3.select("#span-total").text(fmtMs(maxFinish));
       d3.select("#synth-total").text(fmtMs(synthTotal));
@@ -297,55 +365,64 @@
       const merged = enter.merge(items);
       merged.select(".legend-swatch").style("background", (d) => state.color(d));
       merged.select(".legend-label").html((d) => `Style <strong>${d}</strong>`);
-      merged.select(".legend-count").text((d) => {
-        const count = state.data.filter((row) => row.style_id === d).length;
-        return count;
-      });
+      merged.select(".legend-count").text((d) => state.filtered.filter((row) => row.style_id === d).length);
 
       items.exit().remove();
     }
 
-    function refresh() {
-      state.filtered = state.data.slice();
-      updateStats();
-      render();
-    }
-
-    function render() {
-      const width = svg.node().clientWidth || 800;
-      const rowHeight = 16;
-      const margin = { top: 30, right: 20, bottom: 30, left: 70 };
+    function renderChart() {
       const rows = state.filtered
         .slice()
         .sort((a, b) => a.offset_ms - b.offset_ms)
-        .map((row, index) => ({ ...row, job_index: index + 1, row_index: index }));
-      const height = Math.max(320, rows.length * rowHeight + margin.top + margin.bottom);
+        .map((row, index) => ({ ...row, row_index: index }));
 
+      svg.selectAll("*").remove();
+
+      const width = svg.node().clientWidth || 800;
+      const height = Math.max(
+        320,
+        rows.length * layout.rowHeight + layout.margin.top + layout.margin.bottom
+      );
       svg.attr("height", height);
 
-      const maxFinish = d3.max(state.data, (d) => d.finish_ms) || 1;
-      const xBase = d3.scaleLinear().domain([0, maxFinish]).range([margin.left, width - margin.right]);
-      const x = xBase;
-      const y = d3.scaleBand().domain(d3.range(rows.length)).range([margin.top, height - margin.bottom]).padding(0.2);
+      const maxFinish = d3.max(rows, (d) => d.finish_ms) || 1;
+      const x = d3.scaleLinear().domain([0, maxFinish]).range([layout.margin.left, width - layout.margin.right]);
+      const y = d3
+        .scaleBand()
+        .domain(d3.range(rows.length))
+        .range([layout.margin.top, height - layout.margin.bottom])
+        .padding(0.2);
+
+      const root = svg.append("g").attr("class", "chart-root");
 
       const xAxis = (g) => g
         .attr("class", "axis")
-        .attr("transform", `translate(0,${margin.top - 10})`)
+        .attr("transform", `translate(0,${layout.margin.top - 10})`)
         .call(d3.axisTop(x).ticks(Math.min(10, width / 80)).tickFormat((d) => `${d} ms`));
 
-      const tickStep = rows.length > 120 ? 10 : rows.length > 60 ? 5 : 1;
       const yAxis = (g) => g
         .attr("class", "axis")
-        .attr("transform", `translate(${margin.left},0)`)
+        .attr("transform", `translate(${layout.margin.left},0)`)
         .call(d3.axisLeft(y)
-          .tickValues(d3.range(0, rows.length, tickStep))
-          .tickFormat((d) => `Job ${d + 1}`)
+          .tickValues(d3.range(rows.length))
+          .tickFormat((d) => {
+            const row = rows[d];
+            if (!row || !row.worker_id) {
+              return `Job ${row ? row.id : d + 1}`;
+            }
+            return `Job ${row.id} (W${row.worker_id})`;
+          })
           .tickSize(0));
 
-      svg.selectAll(".axis-x").data([null]).join("g").attr("class", "axis-x").call(xAxis);
-      svg.selectAll(".axis-y").data([null]).join("g").attr("class", "axis-y").call(yAxis);
+      const axisX = root.append("g").attr("class", "axis-x");
+      const axisY = root.append("g").attr("class", "axis-y");
+      axisX.call(xAxis);
+      axisY.call(yAxis);
 
-      const segments = svg.selectAll(".segment").data(rows, (d) => `job-${d.job_index}`);
+      const segmentLayer = root.append("g").attr("class", "segment-layer");
+      const synthLayer = root.append("g").attr("class", "synth-layer");
+
+      const segments = segmentLayer.selectAll(".segment").data(rows, (d) => d.id);
 
       segments
         .join("rect")
@@ -364,8 +441,9 @@
             .style("left", `${event.offsetX + 16}px`)
             .style("top", `${event.offsetY + 16}px`)
             .html(`
-              <div><strong>Job ${d.job_index}</strong></div>
+              <div><strong>Job ${d.id}</strong></div>
               <div>Style: ${d.style_id}</div>
+              <div>Worker: ${d.worker_id ?? "n/a"}</div>
               <div>Offset: ${fmtMs(d.offset_ms)}</div>
               <div>Synth start: ${synthStart === null ? "n/a" : fmtMs(synthStart)}</div>
               <div>Synth end: ${synthEnd === null ? "n/a" : fmtMs(synthEnd)}</div>
@@ -384,9 +462,9 @@
           tooltip.classed("show", false);
         });
 
-      const synthSegments = svg.selectAll(".segment-synth").data(
+      const synthSegments = synthLayer.selectAll(".segment-synth").data(
         rows.filter((row) => row.syn_start_ms !== null && row.syn_end_ms !== null),
-        (d) => `synth-${d.job_index}`
+        (d) => `synth-${d.id}`
       );
 
       synthSegments
@@ -398,8 +476,8 @@
         .attr("height", y.bandwidth())
         .attr("fill", (d) => state.color(d.style_id));
 
-      if (state.filtered.length === 0) {
-        svg.selectAll(".empty").data([null]).join("text")
+      if (rows.length === 0) {
+        root.selectAll(".empty").data([null]).join("text")
           .attr("class", "empty")
           .attr("x", width / 2)
           .attr("y", height / 2)
@@ -407,27 +485,40 @@
           .attr("fill", "#7a8da5")
           .text("No segments match the current filters.");
       } else {
-        svg.selectAll(".empty").remove();
+        root.selectAll(".empty").remove();
       }
     }
 
-    d3.json("result.json").then((data) => {
-      state.data = data.map((row) => ({
-        ...row,
-        syn_start_ms: toMs(row.syn_start_ms),
-        syn_end_ms: toMs(row.syn_end_ms),
-        duration_ms: row.finish_ms - row.offset_ms,
-        text_len: row.text.length,
-      }));
-
-      state.styles = Array.from(new Set(state.data.map((d) => d.style_id))).sort((a, b) => a - b);
-      state.color = d3.scaleOrdinal().domain(state.styles).range(d3.schemeTableau10.concat(d3.schemeSet3));
-
+    function renderAll() {
+      updateFilter();
       buildLegend();
-      refresh();
+      updateStats();
+      renderChart();
+    }
+
+    function initWorkerFilter() {
+      workerFilter
+        .selectAll("option.worker")
+        .data(state.workerIds, (d) => d)
+        .join("option")
+        .attr("class", "worker")
+        .attr("value", (d) => d)
+        .text((d) => `W${d}`);
+
+      workerFilter.on("change", (event) => {
+        state.workerFilter = event.target.value;
+        renderAll();
+      });
+    }
+
+    d3.json("result.json").then((data) => {
+      state.data = normalizeData(data);
+      updateDerived();
+      initWorkerFilter();
+      renderAll();
 
       window.addEventListener("resize", () => {
-        render();
+        renderChart();
       });
     });
   </script>
