@@ -1,4 +1,4 @@
-DISTNAME=       qrpc-devel-0.3.0
+DISTNAME=       qrpc-devel-0.3.1
 CATEGORIES=     meta-pkgs www
 MASTER_SITES=   # empty
 
@@ -14,6 +14,7 @@ DEPENDS+=       unzip>=6.0:../../archivers/unzip
 DEPENDS+=       jq>=1.8.1:../../devel/jq
 DEPENDS+=       qrpc-prod>=0.3.0:../../meta-pkgs/qrpc-prod
 DEPENDS+=       pkg_tarup>=1.9.1:../../pkgtools/pkg_tarup
+DEPENDS+=       pkg_developer>=1.2.2:../../meta-pkgs/pkg_developer
 DEPENDS+=       ansible>=12.1.0:../../sysutils/ansible
 # FIXME: need more fix. ommit for qrpc-devel-0.1.0
 # DEPENDS+=       gcc12-libs>=12.1.0:../../lang/gcc12-libs
